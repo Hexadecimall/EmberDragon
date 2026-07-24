@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+# ember-agent — EmberDragon's resident AI BRAIN.
+#
+# Not a one-shot pass (that's ember-ai / ember-ask). This is an AGENT: it
+# understands English, and it autonomously RUNS TOOLS in a loop until the job is
+# done — disassemble, lift, structure, match, name, rewrite, read/write files,
+# run shell — with full control over the decompiler workspace. It lives in the
+# backend (on by default) and has its own chat window. A deep setting toggles it
+# off (then the decompiler falls back to the local/none AI path).
+#
+#   ember-agent                      # interactive chat window (REPL)
+#   ember-agent --once "decompile foo.o and tell me what it does"
+#   ember-agent --selftest           # exercise the tool loop with NO network/key
+#   ember-agent --status | --on | --off    # the deep on/off setting
+#
+# Deps: python3 stdlib ONLY (urllib + subprocess) — no pip, the same pattern as
+# ember-ai. Auth: ANTHROPIC_API_KEY from the environment (never stored in-repo).
+# Model: $NXAI_MODEL (default claude-opus-4-8).
+#
+# SAFETY: for now the agent auto-executes its tools with full control — Gideon's
+# call, since only we have access. Public-release safety filters come later; the
+# hook is execute_tool() (gate/confirm/allowlist there).
+import os, sys, json, subprocess, shlex, time
+import urllib.request, urllib.error
+
+HERE      = os.path.dirname(os.path.abspath(__file__))
+WORKDIR   = os.environ.get("EMBER_WORKDIR", HERE)        # the software it controls
+CONF      = os.path.join(HERE, ".ember-agent.conf")
+MODEL     = os.environ.get("NXAI_MODEL", "claude-opus-4-8")
+API_URL   = "https://api.anthropic.com/v1/messages"
+MAX_TOKENS = 16000
+MAX_STEPS  = 40                                          # tool-loop safety bound per turn
+
+C = {"r":"\033[0m","b":"\033[1m","dim":"\033[2m","cy":"\033[36m",
+     "gr":"\033[32m","ye":"\033[33m","mg":"\033[35m","rd":"\033[31m"}
+def color(on=True):
+    if not on or not sys.stdout.isatty():
+        for k in C: C[k] = ""
+color()
+
+# ─────────────────────────── the deep on/off setting ───────────────────────────
+def load_conf():
+    cfg = {"enabled": "true"}
+    try:
+        with open(CONF) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1); cfg[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+    return cfg
+def save_conf(cfg):
+    with open(CONF, "w") as f:
+        f.write("# ember-agent backend settings (deep)\n")
+        for k, v in cfg.items(): f.write("%s=%s\n" % (k, v))
+def is_enabled():
+    return load_conf().get("enabled", "true").lower() in ("1","true","yes","on")
+
+# ─────────────────────────── tools (full control) ───────────────────────────
+def _resolve(p):
+    return p if os.path.isabs(p) else os.path.join(WORKDIR, p)
+
+def tool_run_shell(command, timeout=180):
+    try:
+        r = subprocess.run(command, shell=True, cwd=WORKDIR, capture_output=True,
+                           text=True, timeout=timeout)
+        out = (r.stdout or "") + (("\n[stderr]\n" + r.stderr) if r.stderr else "")
+        out = out if out.strip() else "(no output)"
+        return "exit=%d\n%s" % (r.returncode, out[:20000])
+    except subprocess.TimeoutExpired:
+        return "error: command timed out after %ds" % timeout
+    except Exception as e:
+        return "error: %s" % e
+
+def tool_read_file(path, max_bytes=60000):
+    try:
+        with open(_resolve(path), "rb") as f:
+            data = f.read(max_bytes + 1)
+        txt = data[:max_bytes].decode("utf-8", "replace")
+        if len(data) > max_bytes: txt += "\n...[truncated]"
+        return txt
+    except Exception as e:
+        return "error: %s" % e
+
+def tool_write_file(path, content):
+    try:
+        full = _resolve(path)
+        os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+        return "wrote %d bytes to %s" % (len(content), path)
+    except Exception as e:
+        return "error: %s" % e
+
+def tool_list_dir(path="."):
+    try:
+        full = _resolve(path)
+        entries = sorted(os.listdir(full))
+        out = []
+        for e in entries:
+            fp = os.path.join(full, e)
+            out.append(("%s/" % e) if os.path.isdir(fp) else "%s (%d)" % (e, os.path.getsize(fp)))
+        return "\n".join(out) if out else "(empty)"
+    except Exception as e:
+        return "error: %s" % e
+
+TOOLS = [
+    {"name": "run_shell",
+     "description": "Run a shell command in the EmberDragon workspace. This is how you drive the whole decompiler — the ember toolchain (ember-dis, ember-lift, ember-arm64, ember-collapse, ember-match, ember-local, ember-sigs, ember-rename, ember-ai, ember-name) all live here and are run this way. Returns exit code + combined stdout/stderr.",
+     "input_schema": {"type":"object","properties":{"command":{"type":"string","description":"the shell command"}},"required":["command"]}},
+    {"name": "read_file",
+     "description": "Read a file (text) from the workspace. Use for inspecting binaries' disassembly dumps, lifted C, corpus records, source, etc.",
+     "input_schema": {"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
+    {"name": "write_file",
+     "description": "Write/overwrite a text file in the workspace (e.g. save recovered/rewritten C source).",
+     "input_schema": {"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}},
+    {"name": "list_dir",
+     "description": "List a directory in the workspace.",
+     "input_schema": {"type":"object","properties":{"path":{"type":"string","description":"default '.'"}},"required":[]}},
+]
+DISPATCH = {
+    "run_shell":  lambda i: tool_run_shell(i.get("command","")),
+    "read_file":  lambda i: tool_read_file(i.get("path","")),
+    "write_file": lambda i: tool_write_file(i.get("path",""), i.get("content","")),
+    "list_dir":   lambda i: tool_list_dir(i.get("path",".")),
+}
+def execute_tool(name, tool_input):
+    # ← public-release safety filters / allowlist / confirm hook goes HERE.
+    fn = DISPATCH.get(name)
+    if not fn: return "error: unknown tool '%s'" % name
+    return fn(tool_input)
+
+SYSTEM = ("You are EmberDragon's resident decompilation AI — you live in the backend of the "
+  "EmberDragon decompiler and have full control over its toolchain in the workspace at "
+  + WORKDIR + ".\n\n"
+  "EmberDragon turns a compiled/stripped binary into clean, named, commented C/C++. The "
+  "pipeline (each a CLI you invoke via run_shell): ember-dis (disassemble) -> ember-lift "
+  "(x86-64 -> pseudo-C) / ember-arm64 (arm64 -> pseudo-C) -> ember-collapse (deflatten / "
+  "fold decompiler artifacts) -> ember-match & ember-sigs (identify functions/intent vs the "
+  "corpus) -> ember-local (offline intent+param naming) / ember-ai (Claude naming pass) / "
+  "ember-name (local var-name model) -> ember-rename (apply names).\n\n"
+  "You understand plain English. When the user asks for something, REASON about it and USE "
+  "TOOLS to actually do it — disassemble, lift, inspect, name, rewrite, save. Chain tools as "
+  "needed; read outputs before concluding. Prefer the ember-* tools for decompilation work; "
+  "use run_shell for anything. Be concise in chat; do the work with tools, then explain what "
+  "you found. If a tool errors, diagnose and adapt. Never fabricate a result you didn't get "
+  "from a tool.")
+
+# ─────────────────────────── the Claude call ───────────────────────────
+def call_api(messages):
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set — export your Claude API key (same one Cerberus uses).")
+    body = json.dumps({"model": MODEL, "max_tokens": MAX_TOKENS, "system": SYSTEM,
+                       "tools": TOOLS, "messages": messages}).encode()
+    req = urllib.request.Request(API_URL, data=body, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=180))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("API error %d: %s" % (e.code, e.read().decode()[:600]))
+
+# ─────────────── pluggable BRAIN (the body is brain-agnostic) ───────────────
+# The agent loop never changes; only the thing that turns messages -> a response
+# (with optional tool_use) swaps out. 'api' = Claude (works now). 'local' = our
+# OWN from-scratch model (ember-brain lineage) — this is the integration seam
+# Gideon wants: the local model plugs in HERE and inherits the whole tool/loop/
+# chat body for free. 'none' = disabled.
+# DEFAULT = local (Apple Intelligence on-device) — EmberDragon's integrated, always-on,
+# private, no-download brain. 'api' = Claude (premium, for serious RE). 'none' = off.
+BRAIN = os.environ.get("EMBER_BRAIN", load_conf().get("brain", "local")).lower()
+APPLE_BIN = os.environ.get("EMBER_APPLE", os.path.join(HERE, "ember-apple"))
+
+def local_brain(messages):
+    # Route the conversation to Apple's on-device foundation model via the ember-apple
+    # bridge. v1 = chat/aide (explain, name, recognize); tool-calling loop = next.
+    parts = []
+    for m in messages:
+        tag = "User: " if m["role"] == "user" else "Assistant: "
+        c = m["content"]
+        if isinstance(c, str):
+            parts.append(tag + c)
+        else:
+            for b in c:
+                if not isinstance(b, dict): continue
+                if b.get("type") == "text": parts.append(tag + b.get("text", ""))
+                elif b.get("type") == "tool_result": parts.append("Tool result: " + str(b.get("content", ""))[:4000])
+    prompt = "\n".join(parts)
+    try:
+        r = subprocess.run([APPLE_BIN], input=prompt, capture_output=True, text=True, timeout=120)
+        out = r.stdout.strip() or ("[ember-apple] " + (r.stderr.strip() or "no output"))
+    except Exception as e:
+        out = "[local brain error: %s — is Apple Intelligence enabled? build: swiftc -O -parse-as-library ember-apple.swift -o ember-apple]" % e
+    return {"stop_reason": "end_turn", "content": [{"type": "text", "text": out}]}
+
+# call_api is swappable (selftest injects a mock); the loop never changes.
+def _select_brain():
+    return {"api": call_api, "local": local_brain}.get(BRAIN, call_api)
+_API = _select_brain()
+
+def agent_turn(messages, on_text=None, on_tool=None):
+    """Run one user turn to completion: loop tool_use until the model stops. Mutates `messages`."""
+    for _ in range(MAX_STEPS):
+        resp = _API(messages)
+        blocks = resp.get("content", [])
+        for b in blocks:
+            if b.get("type") == "text" and on_text:
+                on_text(b.get("text", ""))
+        tool_uses = [b for b in blocks if b.get("type") == "tool_use"]
+        # record the assistant turn verbatim (text + tool_use blocks)
+        messages.append({"role": "assistant", "content": blocks})
+        if resp.get("stop_reason") != "tool_use" or not tool_uses:
+            return
+        results = []
+        for tu in tool_uses:
+            if on_tool: on_tool(tu.get("name",""), tu.get("input",{}))
+            out = execute_tool(tu.get("name",""), tu.get("input",{}) or {})
+            results.append({"type":"tool_result","tool_use_id":tu.get("id",""),"content":out})
+        messages.append({"role":"user","content":results})
+    if on_text: on_text("[stopped: hit the %d-step tool limit for one turn]" % MAX_STEPS)
+
+# ─────────────────────────── chat window ───────────────────────────
+def repl():
+    if not is_enabled():
+        print("ember-agent is OFF (deep setting). Turn it on:  ember-agent --on"); return
+    try: import readline  # nicer line editing if available
+    except Exception: pass
+    print("%s🔥 EmberDragon AI — backend brain online%s  (model %s)" % (C["b"]+C["mg"], C["r"], MODEL))
+    print("%sworkspace:%s %s   %s/exit /reset /tools /off /help%s" % (C["dim"], C["r"], WORKDIR, C["dim"], C["r"]))
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("%s⚠ ANTHROPIC_API_KEY not set — export it to chat with the live model (or try --selftest).%s" % (C["ye"], C["r"]))
+    messages = []
+    while True:
+        try:
+            user = input("%syou ▸%s " % (C["b"]+C["cy"], C["r"])).strip()
+        except (EOFError, KeyboardInterrupt):
+            print(); break
+        if not user: continue
+        if user in ("/exit","/quit"): break
+        if user == "/reset": messages = []; print("%s(context cleared)%s" % (C["dim"], C["r"])); continue
+        if user == "/tools": print("\n".join("  • "+t["name"]+" — "+t["description"].split(".")[0] for t in TOOLS)); continue
+        if user == "/off": save_conf({**load_conf(),"enabled":"false"}); print("agent OFF (backend will fall back to local/none)"); break
+        if user == "/help": print("chat in English; the agent runs ember tools for you. /exit /reset /tools /off"); continue
+        messages.append({"role":"user","content":user})
+        try:
+            agent_turn(messages,
+                on_text=lambda t: print("%sember ▸%s %s" % (C["b"]+C["mg"], C["r"], t)) if t.strip() else None,
+                on_tool=lambda n,i: print("  %s⚙ %s%s %s" % (C["gr"], n, C["r"], C["dim"]+json.dumps(i)[:160]+C["r"])))
+        except Exception as e:
+            print("%serror:%s %s" % (C["rd"], C["r"], e))
+
+def once(prompt):
+    if not is_enabled():
+        print("ember-agent is OFF (deep setting)."); sys.exit(3)
+    messages = [{"role":"user","content":prompt}]
+    try:
+        agent_turn(messages,
+            on_text=lambda t: (print(t) if t.strip() else None),
+            on_tool=lambda n,i: sys.stderr.write("  ⚙ %s %s\n" % (n, json.dumps(i)[:160])))
+    except Exception as e:
+        sys.stderr.write("ember-agent: %s\n" % e); sys.exit(2)
+
+# ─────────────────────────── selftest (no network/key) ───────────────────────────
+def selftest():
+    global _API
+    print("ember-agent selftest — tool layer + agent loop, NO network/key")
+    ok = True
+    # 1) tool layer
+    ld = tool_list_dir(".")
+    print("  list_dir(.)      ->", "OK" if "ember-agent" in ld else "FAIL"); ok &= "ember-agent" in ld
+    rs = tool_run_shell("echo hello-ember")
+    print("  run_shell echo   ->", "OK" if "hello-ember" in rs and "exit=0" in rs else "FAIL"); ok &= "hello-ember" in rs
+    wr = tool_write_file(".ember_selftest.txt", "xyz")
+    rd = tool_read_file(".ember_selftest.txt")
+    print("  write+read_file  ->", "OK" if rd == "xyz" else "FAIL"); ok &= (rd == "xyz")
+    tool_run_shell("rm -f .ember_selftest.txt")
+    # 2) agent loop with a scripted MOCK model: 1st reply calls run_shell, 2nd ends with text
+    state = {"step": 0}
+    def mock(messages):
+        state["step"] += 1
+        if state["step"] == 1:
+            return {"stop_reason":"tool_use","content":[
+                {"type":"text","text":"Listing the workspace."},
+                {"type":"tool_use","id":"t1","name":"run_shell","input":{"command":"echo loop-works"}}]}
+        # verify the tool_result was threaded back into the conversation
+        last = messages[-1]
+        got = last["role"]=="user" and isinstance(last["content"],list) and "loop-works" in last["content"][0]["content"]
+        return {"stop_reason":"end_turn","content":[
+            {"type":"text","text":"Done — tool result threaded: %s" % ("yes" if got else "NO")}]}
+    _API = mock
+    texts = []
+    msgs = [{"role":"user","content":"list the workspace"}]
+    agent_turn(msgs, on_text=lambda t: texts.append(t), on_tool=lambda n,i: texts.append("[tool:%s]"%n))
+    loop_ok = any("threaded: yes" in t for t in texts) and any("[tool:run_shell]" in t for t in texts)
+    print("  agent tool-loop  ->", "OK" if loop_ok else "FAIL"); ok &= loop_ok
+    _API = call_api
+    print(("ALL GREEN" if ok else "FAILURES ABOVE"))
+    sys.exit(0 if ok else 1)
+
+def main():
+    args = sys.argv[1:]
+    if   args[:1] == ["--status"]:
+        print("ember-agent: %s  brain=%s  (api-model %s, workspace %s)" % (
+            "ON" if is_enabled() else "OFF", BRAIN, MODEL, WORKDIR))
+    elif args[:1] == ["--brain"]:
+        b = (args[1] if len(args) > 1 else "").lower()
+        if b not in ("api","local","none"): print("usage: --brain api|local|none"); sys.exit(1)
+        save_conf({**load_conf(),"brain":b}); print("ember-agent: brain=%s" % b)
+    elif args[:1] == ["--on"]:  save_conf({**load_conf(),"enabled":"true"});  print("ember-agent: ON")
+    elif args[:1] == ["--off"]: save_conf({**load_conf(),"enabled":"false"}); print("ember-agent: OFF")
+    elif args[:1] == ["--selftest"]: selftest()
+    elif args[:1] == ["--once"]: once(args[1] if len(args) > 1 else "")
+    elif args[:1] in (["-h"],["--help"]):
+        print("ember-agent — EmberDragon's backend AI brain (English + autonomous tool-use + chat).\n"
+              "  ember-agent                 interactive chat window\n"
+              "  ember-agent --once \"...\"     one-shot (for the GUI panel)\n"
+              "  ember-agent --selftest      exercise the tool loop, no network/key\n"
+              "  ember-agent --status|--on|--off    the deep on/off setting\n"
+              "Needs ANTHROPIC_API_KEY in the env to talk to the live model. Model: $NXAI_MODEL "
+              "(default claude-opus-4-8).")
+    else:
+        repl()
+
+if __name__ == "__main__":
+    main()

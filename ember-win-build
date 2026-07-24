@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ember-win-build — cross-compile the WHOLE EmberDragon toolchain to Windows .exe's
+# from macOS (via pullio's mingw), into a self-contained EmberDragon-win/ folder you can
+# zip and run on Windows. The GUI (ember-gui.exe) runs emberdragon.exe, which runs the
+# engine .exe's next to it — all native, no bash, no python.
+#
+#   ./ember-win-build [dest]      (default: ./EmberDragon-win)
+set -eu
+here="$(cd "$(dirname "$0")" && pwd)"; cd "$here"
+dest="${1:-$here/EmberDragon-win}"
+mkdir -p "$dest"
+
+echo "🪟 cross-compiling the EmberDragon toolchain for Windows…"
+
+# 1. the GUI
+echo "  · ember-gui.exe"
+pullio --gcc cxx Win64 -i ember_gui_win.cpp -o "$dest/ember-gui.exe" --gui \
+  -- -lopengl32 -lgdi32 -luser32 -lcomdlg32 >/dev/null
+
+# 2. the native launcher + the engines (all plain C++ — cross-compile clean)
+for t in emberdragon ember-arm64 ember-lift ember-dis ember-collapse ember-sigs; do
+  echo "  · $t.exe"
+  pullio --gcc cxx Win64 -i "$t.cpp" -o "$dest/$t.exe" >/dev/null
+done
+
+echo
+echo "✅ Windows package -> $dest"
+echo "   zip it and run ember-gui.exe on Windows. (Engines run next to it; no bash/python needed.)"
+echo "   NOTE: the AI passes (ember-claude/ember-ask) + lldb debugger + clang-assemble patching"
+echo "         are mac-tool-backed and won't work on Windows yet — core decompile + FLIRT + byte/hex"
+echo "         patching do. Test on a real Windows box and tell me what breaks."

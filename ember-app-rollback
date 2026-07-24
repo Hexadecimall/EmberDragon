@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# ember-app-rollback — restore a previous EmberDragon.app from the backups that
+# ember-app-bundle makes before every install. If the new build is bad, run this.
+#
+#   ember-app-rollback [--ai] [install-dir]     restore the most recent backup
+#   ember-app-rollback [--ai] --list            list available backups
+#   ember-app-rollback [--ai] <backup-name>     restore a specific backup
+#
+# Backups live in <install-dir>/.emberdragon-backups/ (newest 5 kept per app).
+set -euo pipefail
+
+WITH_AI=0; dest=""; pick=""; LIST=0
+for a in "$@"; do case "$a" in
+  --ai)   WITH_AI=1;;
+  --list) LIST=1;;
+  EmberDragon*) pick="$a";;
+  *) dest="$a";;
+esac; done
+dest="${dest:-$HOME/Applications}"
+NAME="EmberDragon"; [ "$WITH_AI" = 1 ] && NAME="EmberDragon-AI"
+APP="$dest/$NAME.app"
+BK="$dest/.emberdragon-backups"
+
+backups=()   # bash 3.2 (stock macOS) has no mapfile — fill the array portably
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  # "EmberDragon-" is a prefix of "EmberDragon-AI-", so filter to THIS variant only:
+  # after "$NAME-" must come a timestamp digit or "prerollback" (never the other variant's "AI").
+  case "$(basename "$line")" in "$NAME-"[0-9]*|"$NAME-prerollback-"*) backups+=("$line");; esac
+done < <(ls -dt "$BK/$NAME-"*.app 2>/dev/null || true)
+if [ "${#backups[@]}" -eq 0 ]; then echo "no backups for $NAME in $BK"; exit 1; fi
+
+if [ "$LIST" = 1 ]; then
+  echo "backups for $NAME (newest first):"
+  for b in "${backups[@]}"; do echo "  $(basename "$b")   $(date -r "$b" '+%Y-%m-%d %H:%M:%S')"; done
+  exit 0
+fi
+
+target="${backups[0]}"
+if [ -n "$pick" ]; then
+  target=""; for b in "${backups[@]}"; do [ "$(basename "$b")" = "$pick" ] && target="$b" && break; done
+  [ -z "$target" ] && { echo "no backup named '$pick' — try: ember-app-rollback $([ "$WITH_AI" = 1 ] && echo --ai) --list"; exit 1; }
+fi
+
+# before clobbering the current (bad) app, stash it so a rollback is itself reversible
+if [ -d "$APP" ]; then
+  ts="$(date +%Y%m%d-%H%M%S)"; mkdir -p "$BK"
+  rm -rf "$BK/$NAME-prerollback-$ts.app"; mv "$APP" "$BK/$NAME-prerollback-$ts.app"
+  echo "  current app stashed -> $BK/$NAME-prerollback-$ts.app"
+fi
+cp -R "$target" "$APP"
+xattr -cr "$APP" >/dev/null 2>&1 || true        # cp re-adds com.apple.provenance; codesign rejects it
+codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
+touch "$APP"
+echo "✅ rolled back $NAME.app to $(basename "$target")"

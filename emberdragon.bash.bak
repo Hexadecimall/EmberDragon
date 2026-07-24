@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# 🔥🐉 EmberDragon — a decompiler. Machine code -> readable, named, commented C/C++.
+#
+#   emberdragon <binary> [--ai none|api|local]      decompile to stdout
+#   emberdragon <binary> --asm                      raw disassembly listing
+#   emberdragon <binary> --export [--out <dir>]     write decomp/<name>/{c,cpp,asm,headers}/ + manifest
+#
+# Pipeline:  ember-lift (x86-64) / ember-arm64 (arm64)  — disassemble -> lift ->
+#            structure -> recover structs/classes -> name. Engine auto-selected by
+#            the Mach-O cputype. Naming: --ai none (heuristics, default) |
+#            api (Claude, needs ANTHROPIC_API_KEY) | local (EmberDragon's model).
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+mode="${EMBER_AI:-none}"; bin=""; want_asm=0; want_export=0; want_collapse=0; out_dir=""; args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ai) mode="$2"; shift 2;;
+    --ai=*) mode="${1#--ai=}"; shift;;
+    --asm|--disasm) want_asm=1; shift;;
+    --collapse) want_collapse=1; shift;;          # de-bloat the raw lift toward clean source (the 'Clean Up' pass)
+    --export) want_export=1; shift;;
+    --out) out_dir="$2"; shift 2;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    *) if [ -z "$bin" ]; then bin="$1"; else args+=("$1"); fi; shift;;
+  esac
+done
+[ -n "$bin" ] || { echo "usage: emberdragon <binary> [--ai none|api|local] [--collapse] [--asm] [--export [--out dir]]" >&2; exit 2; }
+collapse="cat"; [ "$want_collapse" = 1 ] && [ -x "$here/ember-collapse" ] && collapse="$here/ember-collapse"
+
+# Route by Mach-O cputype (bytes 4..7, little-endian): arm64 (0c000001) -> ember-arm64, else ember-lift.
+engine="$here/ember-lift"; disengine="$here/ember-dis"; disflag=""; arch="x86-64"
+cpu=$(od -An -tx1 -j4 -N4 "$bin" 2>/dev/null | tr -d ' \n')
+if [ "$cpu" = "0c000001" ]; then engine="$here/ember-arm64"; disengine="$here/ember-arm64"; disflag="--disasm"; arch="arm64"; fi
+
+# raw disassembly listing
+if [ "$want_asm" = 1 ]; then "$disengine" $disflag "$bin"; exit 0; fi
+
+# structured multi-format export
+if [ "$want_export" = 1 ]; then
+  name="$(basename "$bin")"
+  : "${out_dir:=$(cd "$(dirname "$bin")" && pwd)/decomp/$name}"
+  mkdir -p "$out_dir"/c "$out_dir"/cpp "$out_dir"/asm "$out_dir"/headers
+  "$engine" "$bin" > "$out_dir/c/$name.c.raw"            # stage 0: lift (engine streams per-fn progress to stderr)
+  "$collapse" < "$out_dir/c/$name.c.raw" > "$out_dir/c/$name.c.stage"   # stage 1: offline de-bloat (cat if not --collapse)
+  [ -s "$out_dir/c/$name.c.stage" ] || cp "$out_dir/c/$name.c.raw" "$out_dir/c/$name.c.stage"
+  case "$mode" in                                        # stage 2: optional AI rewrite pass (opt-in only)
+    api)   "$here/ember-claude" < "$out_dir/c/$name.c.stage" > "$out_dir/c/$name.c" 2>/dev/null || true ;;
+    local) "$here/ember-local"  < "$out_dir/c/$name.c.stage" > "$out_dir/c/$name.c" 2>/dev/null || true ;;
+    *)     cp "$out_dir/c/$name.c.stage" "$out_dir/c/$name.c" ;;
+  esac
+  [ -s "$out_dir/c/$name.c" ] || cp "$out_dir/c/$name.c.stage" "$out_dir/c/$name.c"   # fall back if AI produced nothing
+  rm -f "$out_dir/c/$name.c.raw" "$out_dir/c/$name.c.stage"
+  cp "$out_dir/c/$name.c" "$out_dir/cpp/$name.cpp"        # C++ (class-grouped, same lift)
+  "$disengine" $disflag "$bin" > "$out_dir/asm/$name.s"   # raw disassembly
+  # headers: pull struct/class blocks + function prototypes + extern string decls out of the C
+  python3 - "$out_dir/c/$name.c" "$name" > "$out_dir/headers/$name.h" <<'PY'
+import sys, re
+src = open(sys.argv[1]).read().splitlines(); name = re.sub(r'[^A-Za-z0-9_]', '_', sys.argv[2]).upper()
+print(f"// {sys.argv[2]} — declarations recovered by EmberDragon")
+print(f"#ifndef EMBER_{name}_H\n#define EMBER_{name}_H\n")
+depth = 0; i = 0
+while i < len(src):
+    line = src[i]; s = line.strip()
+    if depth == 0 and (s.startswith("struct ") or s.startswith("class ")) and "{" in s:
+        block = []; d = 0
+        while i < len(src):
+            block.append(src[i]); d += src[i].count("{") - src[i].count("}"); i += 1
+            if d <= 0: break
+        print("\n".join(block) + ("" if block and block[-1].rstrip().endswith(";") else ";")); print(); continue
+    if depth == 0 and s.endswith("{") and "(" in s and not s.startswith(("if","while","for","switch","else")):
+        proto = s[:-1].rstrip()
+        print(proto + ";")
+        d = 0
+        while i < len(src):
+            d += src[i].count("{") - src[i].count("}"); i += 1
+            if d <= 0: break
+        continue
+    m = re.match(r'(const\s+char\*\s+\w+)\s*=', s)
+    if depth == 0 and m: print("extern " + m.group(1) + ";")
+    depth += line.count("{") - line.count("}"); i += 1
+print("\n#endif")
+PY
+  # manifest
+  cfile="c/$name.c"; cppfile="cpp/$name.cpp"; sfile="asm/$name.s"; hfile="headers/$name.h"
+  nfn=$(grep -cE '^\w.*\(.*\) \{' "$out_dir/c/$name.c" 2>/dev/null || echo 0)
+  cat > "$out_dir/manifest.json" <<JSON
+{
+  "tool": "EmberDragon",
+  "source": "$bin",
+  "arch": "$arch",
+  "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "functions": $nfn,
+  "outputs": [
+    { "format": "c",       "path": "$cfile",   "bytes": $(wc -c < "$out_dir/$cfile") },
+    { "format": "cpp",     "path": "$cppfile", "bytes": $(wc -c < "$out_dir/$cppfile") },
+    { "format": "asm",     "path": "$sfile",   "bytes": $(wc -c < "$out_dir/$sfile") },
+    { "format": "headers", "path": "$hfile",   "bytes": $(wc -c < "$out_dir/$hfile") }
+  ]
+}
+JSON
+  echo "exported $name [$arch] -> $out_dir"
+  echo "  c/$name.c  cpp/$name.cpp  asm/$name.s  headers/$name.h  manifest.json"
+  exit 0
+fi
+
+[ -t 2 ] && printf '\033[38;5;208m🔥🐉 EmberDragon\033[0m  \033[2m%s  [%s]  (--ai %s)\033[0m\n' "$(basename "$bin")" "$arch" "$mode" >&2
+case "$mode" in
+  none)  "$engine" "$bin" ${args[@]+"${args[@]}"} | "$collapse";;
+  api)   "$engine" "$bin" ${args[@]+"${args[@]}"} | "$collapse" | "$here/ember-claude";;
+  local) "$engine" "$bin" ${args[@]+"${args[@]}"} | "$collapse" | "$here/ember-local";;
+  *) echo "emberdragon: --ai must be: none | api | local" >&2; exit 2;;
+esac

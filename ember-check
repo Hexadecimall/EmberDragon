@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ember-check — DECOMPILE-QUALITY regression check (beyond the battery's decode-only pass).
+# Decompiles the crackmes + every battery program and tallies SLOP metrics that signal a
+# dataflow/structuring failure, then diffs the totals against a saved baseline so a lifter
+# change can't silently regress quality.
+#   ember-check            run + compare to baseline (ember-check.baseline)
+#   ember-check --save     run + save the current totals as the new baseline
+# Metric (lower is better, except 'lines' which is informational):
+#   undec  = .byte/.word/unknown      (decode gaps)
+#   rawreg = bare xN/wN in output     (LEAKED register — the worst: unresolved dataflow)
+#   emptyloop = `while(){}` / `do{}`  (loop body lost)
+#   goto   = goto statements          (failed structuring)
+#   field  = ->fN accesses            (deref mis-typed as struct)
+#   switch = while(1)switch dispatch  (irreducible fallback)
+set -u   # NOT -e/pipefail: grep exits 1 on no-match, which is normal here
+here="$(cd "$(dirname "$0")" && pwd)"
+A="$here/ember-arm64"; C="$here/ember-collapse"
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+# build the target list: crackmes (prebuilt) + battery src compiled fresh
+targets=()
+for b in "$here"/crackmes/crackme[0-9]*; do [ -x "$b" ] && [ "${b##*.}" != c ] && targets+=("$b"); done
+for f in "$here"/battery/src/*.c "$here"/battery/src/*.cpp; do [ -e "$f" ] || continue
+  base="$(basename "$f")"; ext="${f##*.}"; cc=clang; std=c11; [ "$ext" = cpp ] && { cc=clang++; std=c++17; }
+  o="$tmp/${base%.*}"; if "$cc" -std=$std -O0 "$f" -o "$o" 2>/dev/null; then targets+=("$o"); fi; done
+
+U=0; R=0; E=0; G=0; F=0; S=0; L=0; n=0
+for b in "${targets[@]}"; do
+  out="$("$A" "$b" 2>/dev/null | "$C" 2>/dev/null)" || continue; n=$((n+1))
+  # strip comments so we don't count tokens inside /* ... */ or // ...
+  code="$(printf '%s\n' "$out" | sed -E 's@//.*@@; s@/\*[^*]*\*/@@g')"
+  U=$((U + $(printf '%s' "$code" | grep -cE '\.byte|\.word|unknown' || true) ))
+  R=$((R + $(printf '%s' "$code" | grep -oE '\b[xw](([0-9])|(1[0-9])|(2[0-8]))\b' | grep -vE 'x29' | wc -l | tr -d ' ') ))
+  E=$((E + $(printf '%s\n' "$code" | awk 'prev ~ /(while \(.*\)|do) \{$/ && $0 ~ /^[[:space:]]*\}( while)?/ {c++} {prev=$0} END{print c+0}') ))
+  G=$((G + $(printf '%s' "$code" | grep -cE '\bgoto ' || true) ))
+  F=$((F + $(printf '%s' "$code" | grep -oE '[-]>f[0-9]+' | wc -l | tr -d ' ') ))
+  S=$((S + $(printf '%s' "$code" | grep -cE 'while \(1\) switch' || true) ))
+  L=$((L + $(printf '%s\n' "$out" | wc -l | tr -d ' ') ))
+done
+
+cur="undec=$U rawreg=$R emptyloop=$E goto=$G field=$F switch=$S lines=$L  (over $n binaries)"
+echo "ember-check: $cur"
+bl="$here/ember-check.baseline"
+if [ "${1:-}" = "--save" ]; then echo "$cur" > "$bl"; echo "→ saved as baseline"; exit 0; fi
+if [ -f "$bl" ]; then echo "baseline:    $(cat "$bl")"
+  # compare the four quality metrics (not lines); warn on any increase
+  worse=0
+  for k in undec rawreg emptyloop goto field switch; do
+    c=$(echo "$cur" | grep -oE "$k=[0-9]+" | cut -d= -f2); o=$(cat "$bl" | grep -oE "$k=[0-9]+" | cut -d= -f2 || echo 0)
+    [ -n "$o" ] && [ "$c" -gt "$o" ] && { echo "  ⚠️  $k REGRESSED: $o → $c"; worse=1; }
+    [ -n "$o" ] && [ "$c" -lt "$o" ] && echo "  ✅ $k improved: $o → $c"
+  done
+  [ "$worse" = 0 ] && echo "  no regressions ✓"
+else echo "  (no baseline yet — run 'ember-check --save' to set one)"; fi

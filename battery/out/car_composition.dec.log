@@ -1,0 +1,19 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling Car
+  decompiling report
+  decompiling prepare
+  decompiling Car_dtor
+  decompiling Car
+  decompiling Engine
+  decompiling Wheels
+  decompiling Engine
+  decompiling Wheels
+  decompiling horsepower
+  decompiling running
+  decompiling count
+  decompiling psi
+  decompiling start
+  decompiling inflate
+  decompiling Car_dtor
+ember-arm64: 17 user function(s) decompiled, 47 library function(s) skipped

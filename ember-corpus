@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ember-corpus — build/grow the function-fingerprint similarity corpus.
+# generate (or take real source) -> compile (arm64 + x86, -O0/-O2) -> lift --records
+# -> ember-fp -> append to corpus/sig/sigs.jsonl. Resumable (a ledger skips done work),
+# parallel, no /var temps (build dir under the corpus, cleaned on exit).
+#
+#   ember-corpus <N>                 # generate seeds 0..N-1 and fingerprint them
+#   ember-corpus --src <dir...>      # fingerprint real .c/.cpp under dir(s)
+#   ember-corpus --src <dir> --keep  # keep going, append (default appends anyway)
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+sigdir="$here/corpus/sig"; mkdir -p "$sigdir"
+sigs="$sigdir/sigs.jsonl"; ledger="$sigdir/.done"; touch "$sigs" "$ledger"
+build="$sigdir/.fp_build"; mkdir -p "$build"; trap 'rm -rf "$build"' EXIT
+gendir="$sigdir/gen"; mkdir -p "$gendir"
+
+# collect source files
+srcs=()
+if [ "${1:-}" = "--src" ]; then shift
+  for a in "$@"; do [ "$a" = "--keep" ] && continue
+    if [ -d "$a" ]; then while IFS= read -r f; do srcs+=("$f"); done < <(find "$a" -type f \( -name '*.c' -o -name '*.cpp' -o -name '*.cc' \)); else srcs+=("$a"); fi
+  done
+else
+  N="${1:-100}"
+  for s in $(seq 0 $((N-1))); do "$here/ember-gen" "$s" "$gendir/g$s.cpp"; srcs+=("$gendir/g$s.cpp"); done
+fi
+
+added=0
+for src in "${srcs[@]}"; do
+  cc=clang; case "$src" in *.cpp|*.cc) cc=clang++;; esac
+  sig="$(shasum "$src" | cut -c1-12)"
+  for arch in arm64 x86_64; do
+    eng="$here/ember-arm64"; [ "$arch" = x86_64 ] && eng="$here/ember-lift"
+    for opt in O0 O2; do
+      key="$sig-$arch-$opt"
+      grep -qx "$key" "$ledger" && continue
+      o="$build/$key.o"
+      "$cc" "-$opt" -c -arch "$arch" "$src" -o "$o" 2>/dev/null || { echo "$key" >> "$ledger"; continue; }
+      "$eng" --records "$build/$key.jsonl" "$o" 2>/dev/null >/dev/null || { echo "$key" >> "$ledger"; continue; }
+      "$here/ember-fp" "$build/$key.jsonl" >> "$sigs" 2>/dev/null && { added=$((added+1)); echo "$key" >> "$ledger"; }
+    done
+  done
+done
+total=$(grep -c . "$sigs" || true)
+intents=$(python3 -c 'import json,sys; print(len({json.loads(l).get("label","") for l in open("'"$sigs"'") if json.loads(l).get("label") and not json.loads(l)["label"].startswith("sub_")}))' 2>/dev/null || echo "?")
+echo "ember-corpus: +$added build(s) this run -> $total fingerprints, $intents distinct intents in $sigs"

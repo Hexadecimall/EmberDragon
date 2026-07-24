@@ -1,0 +1,163 @@
+ember-brain: 34059477 chars of raw code
+ember-brain: LSTM H=256 vocab=177 seq=64 — training 150000 iters on 33261K chars
+  iter      0  loss/char 5.176  ppl 177.0
+  iter   2000  loss/char 2.699  ppl 14.9
+  iter   4000  loss/char 1.855  ppl 6.4
+  iter   6000  loss/char 1.871  ppl 6.5
+  iter   8000  loss/char 1.942  ppl 7.0
+  iter  10000  loss/char 1.094  ppl 3.0
+  iter  12000  loss/char 1.315  ppl 3.7
+  iter  14000  loss/char 1.565  ppl 4.8
+  ── sample ──
+            std::out << "\r" derminen + - 16 - 0;
+            std::thent (mastore on + 1;
+            std::coutronter_code_copprovergeb_coutt_mergen(f), box_ok("╰","win32_provesterm"[ack);
+        if (!std::makecubrelker_seq) corsolecesse_box();
+            
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  16000  loss/char 1.362  ppl 3.9
+  iter  18000  loss/char 1.195  ppl 3.3
+  iter  20000  loss/char 0.629  ppl 1.9
+  iter  22000  loss/char 0.931  ppl 2.5
+  iter  24000  loss/char 1.284  ppl 3.6
+  iter  26000  loss/char 1.213  ppl 3.4
+  iter  28000  loss/char 1.332  ppl 3.8
+  iter  30000  loss/char 1.250  ppl 3.5
+  ── sample ──
+    // file
+    R("KERNEL32!FileExW",        th_GrtLDirectoryW, 2);
+    R("KERNEL32!Wrytes",  th_ReadADOrt12, 1);
+    R("KERNEL32!LstrcmpoFileTimeCommaniayW, 2);
+    R("KERNEL32!SetFileTime",      th_GetFileComperfWinityWide",         th_RowLineW",          th
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  32000  loss/char 1.254  ppl 3.5
+  iter  34000  loss/char 1.187  ppl 3.3
+  iter  36000  loss/char 1.356  ppl 3.9
+  iter  38000  loss/char 1.250  ppl 3.5
+  iter  40000  loss/char 1.260  ppl 3.5
+  iter  42000  loss/char 1.007  ppl 2.7
+  iter  44000  loss/char 1.224  ppl 3.4
+  ── sample ──
+#include <sys/st>
+#include <sys/stat64.h>
+#include <sermit>>
+#include <sys/stat.h>
+#include <sys/to_essec.h>
+#include <size.h>
+#include.  static_cast<int64_t>(s.st_mtime_ino)(HDC)) {
+    uint32_t st_t     to BuildEntry->4;
+    o.st_ctime_sec = static_cast<int6
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  46000  loss/char 0.955  ppl 2.6
+  iter  48000  loss/char 1.068  ppl 2.9
+  iter  50000  loss/char 1.136  ppl 3.1
+  iter  52000  loss/char 1.067  ppl 2.9
+  iter  54000  loss/char 1.290  ppl 3.6
+  iter  56000  loss/char 1.333  ppl 3.8
+  iter  58000  loss/char 1.082  ppl 3.0
+  iter  60000  loss/char 0.954  ppl 2.6
+  ── sample ──
+  _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCEPT_HISCOPPTEX2__HIDE_FROM_ABI __static_bounded_iter>
+struct <__biresize.h>
+#include <__ctar/ists<_static_iterator_traits<iterator/tri.
+static_const _NOEXCEPT
+  _LIBCPP_CONSTEXPR_SINCE_CXX14 reference in _ep:
+  _LI
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  62000  loss/char 0.700  ppl 2.0
+  iter  64000  loss/char 0.756  ppl 2.1
+  iter  66000  loss/char 0.703  ppl 2.0
+  iter  68000  loss/char 0.787  ppl 2.2
+  iter  70000  loss/char 0.753  ppl 2.1
+  iter  72000  loss/char 0.620  ppl 1.9
+  iter  74000  loss/char 0.674  ppl 2.0
+  ── sample ──
+#include <__constenh>
+
+#include ___ranh.h>
+_LIBCPP_HIDE_FROM_ABI inline constexpr chrono::day(const yar_day_last __rhs) _NOEXCEPT { return __lhs.pegun_month_day_last() : __rhs.ysar(), __rhs + __i < 64_i ? equal_to<remonth.type>(), __y - __rhsey_day_last()};
+  
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  76000  loss/char 0.659  ppl 1.9
+  iter  78000  loss/char 0.611  ppl 1.8
+  iter  80000  loss/char 0.738  ppl 2.1
+  iter  82000  loss/char 0.670  ppl 2.0
+  iter  84000  loss/char 0.536  ppl 1.7
+  iter  86000  loss/char 0.461  ppl 1.6
+  iter  88000  loss/char 0.515  ppl 1.7
+  iter  90000  loss/char 0.474  ppl 1.6
+  ── sample ──
+#endif // _LIBCPP___TYPE_TRAITS_ODAPLIC_TEMPLY_H
+
+
+// ═════ STD++: invoke_reference_v = _Traits aligned inline constexpr bool is_disable_v = _To.
+#  if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
+#  pragma GCC system_header
+#endif
+
+_LIBCPP_BEGIN_NA
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter  92000  loss/char 0.499  ppl 1.6
+  iter  94000  loss/char 0.518  ppl 1.7
+  iter  96000  loss/char 0.506  ppl 1.7
+  iter  98000  loss/char 0.495  ppl 1.6
+  iter 100000  loss/char 0.536  ppl 1.7
+  iter 102000  loss/char 0.541  ppl 1.7
+  iter 104000  loss/char 0.609  ppl 1.8
+  ── sample ──
+    iterator   {
+      typedef table<.system_erase_if(__u);
+        return (*n *(2, std::move(__s.fram, static_cast<intr_t>()), __n)); }
+    if (__last) {
+      return __last_ctime_optity(__p, key_equal(), __i); }
+
+  _LIBCPP_HIDE_FROM_ABI from_range, case _Val
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter 106000  loss/char 0.489  ppl 1.6
+  iter 108000  loss/char 0.756  ppl 2.1
+  iter 110000  loss/char 0.613  ppl 1.8
+  iter 112000  loss/char 0.500  ppl 1.6
+  iter 114000  loss/char 0.633  ppl 1.9
+  iter 116000  loss/char 0.730  ppl 2.1
+  iter 118000  loss/char 0.599  ppl 1.8
+  iter 120000  loss/char 0.679  ppl 2.0
+  ── sample ──
+    template<class U>, constexpr explicit __pred() const/7  = memory_ordering(__prior_abs<_Traits>&, 2 && != see begin ||is_nonunicode_served_strictop&) = deuad;
+    constexpr iterator througr(!is-greambuft<_Traits>&, traits::pos_type __rhs) noexcept bad_optra
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter 122000  loss/char 0.633  ppl 1.9
+  iter 124000  loss/char 0.663  ppl 1.9
+  iter 126000  loss/char 0.600  ppl 1.8
+  iter 128000  loss/char 0.752  ppl 2.1
+  iter 130000  loss/char 0.939  ppl 2.6
+  iter 132000  loss/char 0.865  ppl 2.4
+  iter 134000  loss/char 0.675  ppl 2.0
+  ── sample ──
+    bool __is_equal_col_overwray{Size(last, __value) {
+    return __pstl::__handle_exception<_Implementation>(
+        std::move(__first), __pred);
+  }
+};
+_LIBCPP_END_NAMESPACE_STD
+
+_LIBCPP_END_NAMESPACE_STD
+
+_LIBCPP_REQUIRE_CPP17_FORWARD_ITERATOR(_ForwardOutI
+  ────
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)
+  iter 136000  loss/char 0.508  ppl 1.7
+  iter 138000  loss/char 0.479  ppl 1.6
+  iter 140000  loss/char 0.417  ppl 1.5
+  iter 142000  loss/char 1.101  ppl 3.0
+  iter 144000  loss/char 1.438  ppl 4.2
+  iter 146000  loss/char 1.347  ppl 3.8
+  iter 148000  loss/char 1.107  ppl 3.0
+ember-brain: saved -> corpus/ember-brain.bin (LSTM H=256 vocab=177)

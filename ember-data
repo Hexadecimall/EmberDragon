@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ember-data — training-pair factory for the decompiler's OWN model.
+# For each source file: compile -> STRIP-style decompile (ember-lift --nosym) -> emit
+# one JSONL example {input: placeholder-name C, target: original source}. The
+# aligned (stripped, original-names) pairs are exactly what a naming model learns.
+# This is the unique asset: pullio/clang compiles, ember-lift decompiles, so we can
+# mint unlimited labeled data for free.
+#
+#   ember-data corpus.jsonl src1.c src2.cpp ...
+#   ember-data corpus.jsonl path/to/dir/        (all .c/.cpp/.cc under dir, recursive)
+#
+# No /var temps (per policy): build artifacts go in <out-dir>/.nxd_build and are
+# cleaned up. Deps: clang + ember-lift + python3 stdlib.
+set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: ember-data corpus.jsonl <src files or dirs...>" >&2; exit 2; }
+here="$(cd "$(dirname "$0")" && pwd)"
+out="$1"; shift
+build="$(cd "$(dirname "$out")" && pwd)/.nxd_build"; rm -rf "$build"; mkdir -p "$build"
+trap 'rm -rf "$build"' EXIT
+
+# expand dirs -> file list
+srcs=()
+for a in "$@"; do
+  if [ -d "$a" ]; then while IFS= read -r f; do srcs+=("$f"); done \
+       < <(find "$a" -type f \( -name '*.c' -o -name '*.cpp' -o -name '*.cc' \)); \
+  else srcs+=("$a"); fi
+done
+
+kept=0; n=0
+for src in "${srcs[@]}"; do
+  n=$((n+1))
+  o="$build/u$n.o"
+  cc=clang; case "$src" in *.cpp|*.cc) cc=clang++;; esac
+  "$cc" -O0 -c -arch x86_64 "$src" -o "$o" 2>/dev/null || { echo "skip(no-compile): $src" >&2; continue; }
+  dec="$("$here/ember-lift" --nosym "$o" 2>/dev/null || true)"
+  [ -n "$dec" ] || { echo "skip(no-decompile): $src" >&2; continue; }
+  export NXD_IN="$dec" NXD_TGT="$(cat "$src")" NXD_SRC="$src"
+  python3 - >> "$out" <<'PY'
+import os, json
+print(json.dumps({"src": os.environ["NXD_SRC"],
+                  "input": os.environ["NXD_IN"],
+                  "target": os.environ["NXD_TGT"]}))
+PY
+  kept=$((kept+1)); echo "+ $src" >&2
+done
+echo "ember-data: $kept/$n pairs -> $out  (total lines: $(wc -l < "$out" | tr -d ' '))" >&2

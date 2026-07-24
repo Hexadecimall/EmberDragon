@@ -1,0 +1,7 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling op_add
+  decompiling op_sub
+  decompiling op_mul
+  decompiling op_max
+ember-arm64: 5 user function(s) decompiled, 35 library function(s) skipped

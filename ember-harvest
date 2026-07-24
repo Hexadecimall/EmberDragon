@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# ember-harvest — build ember-brain's training corpus from THIS machine (no
+# downloads). Mixes, roughly balanced:
+#   CODE     — Gideon's real repos + the C++ standard library + C headers + the
+#              synthetic comment-rich set (teaches "normal" idiomatic C/C++).
+#   ENGLISH  — every .md/.txt doc on disk (teaches English so prompts/comments
+#              actually work — ~same volume as the code).
+# Skips toolchain/sysroot/build/vendored trees and files > 200 KB.
+# Output: corpus/code.txt
+set -eu   # not pipefail: a find that hits an unreadable dir shouldn't abort the harvest
+here="$(cd "$(dirname "$0")" && pwd)"
+OUT="$here/corpus/code.txt"; : > "$OUT"
+
+SDK="$(xcrun --show-sdk-path 2>/dev/null || echo)"
+CXXINC="$SDK/usr/include/c++/v1"; CINC="$SDK/usr/include"
+
+# cat a NUL-delimited file list (stdin) under a byte budget (0 = unlimited);
+# echoes bytes added so the caller can tally code vs english.
+add_files(){ local label="$1" budget="$2" maxf="${3:-200000}" used=0 f sz
+  while IFS= read -r -d '' f; do
+    sz=$(wc -c < "$f" 2>/dev/null || echo 0)
+    { [ "$sz" -gt 0 ] && [ "$sz" -le "$maxf" ]; } || continue
+    { [ "$budget" -gt 0 ] && [ $((used+sz)) -gt "$budget" ]; } && break
+    printf '\n\n// ═════ %s: %s ═════\n\n' "$label" "${f##*/}" >> "$OUT"
+    cat "$f" >> "$OUT"; used=$((used+sz))
+  done; echo "$used"; }
+
+EXCL=( -not -path '*/.git/*' -not -path '*/toolchain/*' -not -path '*/toolchains/*'
+       -not -path '*/sysroot/*' -not -path '*/_srcbuild/*' -not -path '*/toolchain-src/*'
+       -not -path '*/lib-dylibs/*' -not -path '*/.nxd_build/*' -not -path '*/node_modules/*'
+       -not -path '*/corpus/src/*' -not -path '*/corpus/code.txt' -not -path '*/corpus/code_web/*' )   # src=via jsonl; code.txt=output; code_web=added below w/ bigger cap (corpus/web/*.txt IS included as English)
+SRC=( -name '*.c' -o -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.hpp' -o -name '*.mm' -o -name '*.m' -o -name '*.py' -o -name '*.java' )
+
+codeB=0; engB=0
+# 1) Gideon's real code
+b=$(find "$HOME/pullio" "/Users/gideoncox/Developer/Xcode/VERY Important./Compat layer/NXRT" "/opt/Lumen" "$HOME/Lumen" "$HOME/TRON!!!" \
+      -type f \( "${SRC[@]}" \) "${EXCL[@]}" 2>/dev/null -print0 | add_files "CODE" 0); codeB=$((codeB+b))
+# 2) C++ standard library (the "normal stuff") — capped so it doesn't swamp the rest
+[ -d "$CXXINC" ] && { b=$(find "$CXXINC" -type f ! -name '*.modulemap' 2>/dev/null -print0 | add_files "STD++" $((5*1024*1024))); codeB=$((codeB+b)); }
+# 3) C standard headers
+[ -d "$CINC" ] && { b=$(find "$CINC" -maxdepth 2 -name '*.h' 2>/dev/null -print0 | add_files "STDC" $((2*1024*1024))); codeB=$((codeB+b)); }
+# 3b) real-world OSS C/C++ fetched via curl (stb/lua/redis/json/fmt/doom — well-commented idioms)
+[ -d "$here/corpus/code_web" ] && { b=$(find "$here/corpus/code_web" -type f \( "${SRC[@]}" \) 2>/dev/null -print0 | add_files "OSS" $((4*1024*1024)) 1500000); codeB=$((codeB+b)); }
+# 4) synthetic comment-rich targets (great commenting examples)
+if [ -f "$here/corpus/corpus.jsonl" ]; then
+  pre=$(wc -c < "$OUT"); python3 - "$here/corpus/corpus.jsonl" >> "$OUT" <<'PY'
+import sys, json
+for line in open(sys.argv[1]):
+    try: d=json.loads(line)
+    except: continue
+    print("\n\n// ═════ SYNTH ═════\n\n"+d.get("target",""))
+PY
+  codeB=$((codeB + $(wc -c < "$OUT") - pre))
+fi
+# 5) ENGLISH side — Python stdlib (huge English docstrings explaining code → teaches
+#    English↔code so prompts/explanations work) + all markdown docs. ~balances the code.
+PYLIB="$(ls -d /opt/homebrew/Cellar/python@3.*/*/Frameworks/Python.framework/Versions/3.*/lib/python3.* 2>/dev/null | head -1 || true)"
+[ -n "${PYLIB:-}" ] && [ -d "$PYLIB" ] && {
+  b=$(find "$PYLIB" -name '*.py' ! -path '*/site-packages/*' ! -path '*/test/*' ! -path '*/tests/*' ! -path '*/idlelib/*' 2>/dev/null -print0 \
+      | add_files "PYDOC" $((10*1024*1024)) 300000); engB=$((engB+b)); }
+b=$(find "$HOME/pullio" "/opt/Lumen" "$HOME/Lumen" "$HOME/TRON!!!" "$HOME/.claude/projects" \
+      -type f \( -name '*.md' -o -name '*.txt' -o -name '*.markdown' -o -name 'README*' \) "${EXCL[@]}" 2>/dev/null -print0 \
+    | add_files "DOC" 0 2000000); engB=$((engB+b))
+
+total=$(wc -c < "$OUT")
+echo "ember-harvest → $OUT" >&2
+echo "  CODE: $((codeB/1024)) KB   ENGLISH: $((engB/1024)) KB   TOTAL: $((total/1024)) KB" >&2

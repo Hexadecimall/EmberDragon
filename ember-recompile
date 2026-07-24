@@ -1,0 +1,19 @@
+#!/bin/zsh
+# ember-recompile <binary> [-o out] [-- run-args] — decompile a binary, recompile the
+# cleaned source with clang++, and (if it builds) run it. The terminal round-trip, no .app.
+emit_run=1; out=""; args=()
+bin="$1"; shift
+while [[ $# -gt 0 ]]; do case "$1" in -o) out="$2"; shift 2;; --) shift; args=("$@"); break;; *) shift;; esac; done
+[[ -z "$bin" || ! -e "$bin" ]] && { echo "usage: ember-recompile <binary> [-o out] [-- args]"; exit 2; }
+here="${0:A:h}"; name="${bin:t:r}"; [[ -z "$out" ]] && out="/tmp/${name}.recompiled"
+src="/tmp/${name}.dec.cpp"
+"$here/emberdragon" "$bin" --collapse > "$src" 2>/dev/null
+[[ -s "$src" ]] || { echo "decompile produced no source"; exit 1; }
+echo "→ source: $src ($(wc -l < $src) lines)"
+if clang++ -x c++ -std=c++17 -w "$src" -o "$out" 2>/tmp/${name}.cc.err; then
+  echo "✓ compiled: $out"
+  [[ $emit_run -eq 1 ]] && { echo "→ running:"; "$out" "${args[@]}"; echo "[exit $?]"; }
+else
+  echo "✗ did not compile (decompiler ceiling for this binary). errors:"; grep -m4 error: /tmp/${name}.cc.err
+  exit 1
+fi

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ember-local — route ember-lift output through OUR OWN model, served locally. Reads the
+# decompiled C on stdin, POSTs it to a local inference server, prints the renamed
+# code. Contract: POST raw code body -> server returns renamed code body.
+# Server URL: $NX_LOCAL_URL (default http://127.0.0.1:8080/rename).
+#
+# Until the custom model is trained + served, this prints a notice on stderr and
+# passes the heuristic output through unchanged — so `--ai local` never breaks,
+# it just degrades to heuristics until the model is live.
+set -euo pipefail
+URL="${NX_LOCAL_URL:-http://127.0.0.1:8080/rename}"
+code="$(cat)"
+out="$(printf '%s' "$code" | curl -fsS -m 120 -X POST --data-binary @- \
+      -H 'content-type: text/plain' "$URL" 2>/dev/null || true)"
+if [ -z "$out" ]; then
+  echo "ember-local: no local model at $URL — train+serve ours (see ember-data), passing heuristic output through." >&2
+  printf '%s\n' "$code"
+else
+  printf '%s\n' "$out"
+fi

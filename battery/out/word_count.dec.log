@@ -1,0 +1,16 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling isalpha
+  decompiling tolower
+  decompiling Entry_dtor
+  decompiling __istype
+  decompiling isascii
+  decompiling Entry_dtor
+  decompiling operator_call
+  decompiling operator_call
+  decompiling Entry
+  decompiling Entry
+  decompiling operator_call
+  decompiling operator_call
+  decompiling operator=
+ember-arm64: 14 user function(s) decompiled, 234 library function(s) skipped

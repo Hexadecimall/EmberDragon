@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# ember-fp — fingerprint per-function records (from `ember-lift/ember-arm64 --records`)
+# into compact, opt-robust feature vectors for similarity matching. Arch-agnostic:
+# it parses the record's `disasm` mnemonics (no re-decode), so x86 and arm64 both work.
+#
+#   ember-fp <records.jsonl> [...]      # -> fingerprint JSONL on stdout (one per function)
+#   cat recs.jsonl | ember-fp -         # stdin
+#
+# fingerprint = {label,name,addr,arch,size, feat[24] (log-quantized class histogram),
+#                consts[] (magic-number identity), calls[] (callee neighbors), nblocks, nloops}
+import sys, json, re, math
+
+CLASSES = ["mov","add","sub","logic","shift","mul","div","cmp","test","call","cond_branch",
+           "uncond_branch","ret","incdec","neg","pushpop","load","store","imm","cmov","ext",
+           "setcc","sse","other"]
+CI = {c:i for i,c in enumerate(CLASSES)}
+NCLASS = len(CLASSES)
+
+def class_of(mn):
+    mn = mn.lower().rstrip('.')
+    if mn in ("mov","movb","movz","movk","movn","fmov","mvn","movzxb","movzxw","movsxb","movsxw","lea","mov"): return CI["mov"]
+    if mn in ("movsxd","cdqe","cdq","cqo","sxtw","sxtb","sxth","uxtb","uxth","movsx"): return CI["ext"]
+    if mn in ("add","adc","adds","madd"): return CI["add"]
+    if mn in ("sub","sbb","subs","sbc"): return CI["sub"]
+    if mn in ("and","or","orr","xor","eor","not","ands","orn","bic"): return CI["logic"]
+    if mn in ("shl","shr","sar","rol","ror","rcl","rcr","lsl","lsr","asr","extr"): return CI["shift"]
+    if mn in ("imul","imul3","mul","smull","umull","mneg","fmul"): return CI["mul"]
+    if mn in ("idiv","div","sdiv","udiv","fdiv"): return CI["div"]
+    if mn in ("cmp","ccmp","ccmn","fcmp"): return CI["cmp"]
+    if mn in ("test","tst"): return CI["test"]
+    if mn in ("call","callr","bl","blr"): return CI["call"]
+    if mn in ("ret","retab","retaa"): return CI["ret"]
+    if mn in ("inc","dec"): return CI["incdec"]
+    if mn in ("neg","negs"): return CI["neg"]
+    if mn in ("push","pop","stp","ldp"): return CI["pushpop"]
+    if mn in ("cmov","csel","csinc","csinv","csneg","cset","csetm") or mn.startswith("cmov"): return CI["cmov"]
+    if mn.startswith("ldr") or mn in ("ldur","ldrb","ldrh","ldrsw","ldrsb","ldrsh"): return CI["load"]
+    if mn.startswith("str") or mn in ("stur","strb","strh"): return CI["store"]
+    if mn in ("jmp","jmpr","b","br"): return CI["uncond_branch"]
+    if mn=="jcc" or (mn.startswith("j") and len(mn)<=4) or mn.startswith("b.") or mn in ("cbz","cbnz","tbz","tbnz"): return CI["cond_branch"]
+    if mn=="setcc" or mn.startswith("set"): return CI["setcc"]
+    if mn in ("sse",".sse") or mn.startswith("f") or mn.startswith("v"): return CI["sse"]
+    return CI["other"]
+
+CALL_MN  = ("call","callr","bl","blr")
+BR_MN    = ("jmp","jmpr","b","br","jcc","cbz","cbnz","tbz","tbnz")
+LINE_RE  = re.compile(r'0x([0-9a-fA-F]+):\s*(\S+)\s*(.*)')
+HEX_RE   = re.compile(r'0x[0-9a-fA-F]+')
+IMM_RE   = re.compile(r'#?(-?0x[0-9a-fA-F]+|-?\b\d{2,})')   # immediates (>=2 digits or hex) -> magic-number identity
+
+def logq(n):  # log-quantized count so -O0 and -O2 land close
+    return round(4*math.log2(1+n), 2)
+
+def fingerprint(rec):
+    disasm = rec.get("disasm", [])
+    hist = [0]*NCLASS
+    consts=set(); calls=set(); branches=[]; addrs=[]
+    for line in disasm:
+        m = LINE_RE.match(line)
+        if not m: continue
+        addr=int(m.group(1),16); mn=m.group(2); ops=m.group(3)
+        addrs.append(addr); hist[class_of(mn)] += 1
+        mnl=mn.lower()
+        if mnl.startswith("j") or mnl.startswith("b") or mnl in BR_MN:
+            tg = HEX_RE.search(ops)
+            if tg: branches.append((addr, int(tg.group(0),16)))
+        if mnl in CALL_MN:
+            tgt = ops.strip()
+            if tgt and not tgt.startswith("0x") and not tgt.startswith("sub_"): calls.add(tgt.split(',')[0].strip())
+        else:
+            for im in IMM_RE.findall(ops):
+                v=int(im,16) if im.lower().startswith(("0x","-0x")) else int(im)
+                if -0x10000 < v < 0x10000 and abs(v)<64: continue   # tiny offsets/counts are noise
+                consts.add(im)
+    nloops = sum(1 for (a,t) in branches if t<=a and t>=min(addrs or [0]))
+    nblocks = len(branches)+1
+    feat = [logq(h) for h in hist]
+    return {"label":rec.get("label",""), "name":rec.get("name",""), "addr":rec.get("addr",""),
+            "arch":rec.get("arch","?"), "size":rec.get("size",0), "feat":feat,
+            "consts":sorted(consts), "calls":sorted(calls), "nblocks":nblocks, "nloops":nloops}
+
+def main():
+    args=sys.argv[1:]
+    if not args: print("usage: ember-fp <records.jsonl ...>  (or - for stdin)", file=sys.stderr); sys.exit(2)
+    streams = [sys.stdin] if args==["-"] else [open(a) for a in args]
+    out=sys.stdout
+    for st in streams:
+        for line in st:
+            line=line.strip()
+            if not line: continue
+            try: rec=json.loads(line)
+            except Exception: continue
+            out.write(json.dumps(fingerprint(rec))+"\n")
+
+if __name__=="__main__": main()

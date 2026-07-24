@@ -1,0 +1,12 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling eval_rpn
+  decompiling apply
+  decompiling operator_call
+  decompiling operator_call
+  decompiling operator_call
+  decompiling operator_call
+  decompiling operator_call
+  decompiling operator_call
+  decompiling basic_istringstream_dtor
+ember-arm64: 10 user function(s) decompiled, 188 library function(s) skipped

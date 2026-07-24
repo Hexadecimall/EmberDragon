@@ -1,0 +1,242 @@
+[
+ {
+  "file": "expr_chain.c",
+  "cat": "arith",
+  "blurb": "Deep integer expression chains: precedence, ternary, comma-like side effects, shifts, mod, and an avalanche-style accumulator loop"
+ },
+ {
+  "file": "bit_pack.c",
+  "cat": "arith",
+  "blurb": "Bit-packing/unpacking of an RGBA pixel plus 3-bit flags into a u32, with a round-trip verification loop using struct fields, shifts and masks"
+ },
+ {
+  "file": "popcount_parity.cpp",
+  "cat": "arith",
+  "blurb": "Hand-rolled popcount two ways (Kernighan bit-clear loop + SWAR) and a parity computed via a 16-entry LUT packed in a constant, cross-checked over LCG-varied inputs"
+ },
+ {
+  "file": "fixed_point.cpp",
+  "cat": "arith",
+  "blurb": "Q16.16 fixed-point arithmetic: mul/div via 64-bit intermediates and a Newton-iteration fixed-point sqrt, accumulating pi*r^2 with no float I/O"
+ },
+ {
+  "file": "crc_modexp.c",
+  "cat": "arith",
+  "blurb": "CRC-32 (bit-at-a-time, branchless mask trick) over a string plus square-and-multiply modular exponentiation used for a Fermat little-theorem primality check"
+ },
+ {
+  "file": "lcg_stats.cpp",
+  "cat": "arith",
+  "blurb": "A 64-bit MMIX-style LCG RNG feeding a top-bits histogram plus integer running sum/sum-of-squares, with float mean/variance/sqrt at the end (printed as ints)"
+ },
+ {
+  "file": "recursion_zoo.c",
+  "cat": "control",
+  "blurb": "Five classic recursive functions (factorial, gcd, fibonacci, ackermann, towers-of-hanoi move count) \u2014 exercises self/mutual/tree recursion and tail-call shapes."
+ },
+ {
+  "file": "nested_loops_matrix.cpp",
+  "cat": "control",
+  "blurb": "Triple-nested matrix multiply plus a doubly-nested Sieve of Eratosthenes \u2014 exercises deep loop nesting and induction-variable analysis."
+ },
+ {
+  "file": "switch_dispatcher.c",
+  "cat": "control",
+  "blurb": "A tiny stack-VM bytecode interpreter dispatched by a switch over opcodes \u2014 exercises jump-table recovery and a while+switch loop."
+ },
+ {
+  "file": "goto_state_machine.c",
+  "cat": "control",
+  "blurb": "A lexer-style finite state machine built entirely from labels and goto \u2014 exercises irreducible/back-edge control flow and label recovery."
+ },
+ {
+  "file": "guard_clauses.cpp",
+  "cat": "control",
+  "blurb": "Triangle classifier with stacked guard clauses and early returns, fed through a switch namer \u2014 exercises short-circuit conditions and multi-exit functions."
+ },
+ {
+  "file": "do_while_collatz.cpp",
+  "cat": "control",
+  "blurb": "Two post-test do/while loops: a Collatz step-counter and an integer digit-reversal \u2014 exercises bottom-tested loop reconstruction."
+ },
+ {
+  "file": "three_sorts.c",
+  "cat": "arrays",
+  "blurb": "Bubble, insertion, and selection sort on three separate int arrays \u2014 three classic nested-loop sort shapes with in-place swaps in one program"
+ },
+ {
+  "file": "binsearch_reverse.cpp",
+  "cat": "arrays",
+  "blurb": "Binary search (while-loop with lo/hi/mid branching) plus in-place two-pointer reverse on a std::vector \u2014 exercises divide-and-conquer control flow and range-for iteration"
+ },
+ {
+  "file": "string_primitives.c",
+  "cat": "arrays",
+  "blurb": "From-scratch strlen/strcmp/strcpy reimplemented with raw pointer arithmetic \u2014 pointer-walking loops the decompiler must recover as the standard string idioms"
+ },
+ {
+  "file": "matrix_multiply.cpp",
+  "cat": "arrays",
+  "blurb": "Classic 3x3 matrix multiply with the triple-nested i/j/k loop and accumulator \u2014 2D array indexing and the canonical matmul shape"
+ },
+ {
+  "file": "run_length_encode.c",
+  "cat": "arrays",
+  "blurb": "Run-length encoder: scans a C string, counts consecutive runs, and emits char+count digit pairs into an output buffer \u2014 nested while-loops over a flat char array"
+ },
+ {
+  "file": "histogram_count.cpp",
+  "cat": "arrays",
+  "blurb": "Counting/histogram pass: tallies letter frequencies into a 26-bucket array, finds total+peak, then renders bars \u2014 array-as-accumulator with a char-to-index map"
+ },
+ {
+  "file": "geom_struct.c",
+  "cat": "structs",
+  "blurb": "C structs with functions taking T*: Point distance (sqrt) and Rectangle area, plus an in-place mutator via pointer \u2014 exercises arrow-operator member access and nested-struct field access."
+ },
+ {
+  "file": "bank_account.cpp",
+  "cat": "structs",
+  "blurb": "C++ class with private fields (string owner, long balance) and public deposit/withdraw methods returning bool, with input validation \u2014 exercises encapsulation, const accessors, and a guarded branch on member state."
+ },
+ {
+  "file": "counter_class.cpp",
+  "cat": "structs",
+  "blurb": "A small Counter class with a configurable step, tick/untick/reset methods, and a static instance tally \u2014 exercises instance method calls, a static member variable, and a loop driving member mutation."
+ },
+ {
+  "file": "vec2_operators.cpp",
+  "cat": "structs",
+  "blurb": "A Vec2 value class with overloaded operator+ and operator== plus a scaled() method returning a new instance \u2014 exercises operator overloading, by-value returns of class objects, and a boolean compound condition on members."
+ },
+ {
+  "file": "car_composition.cpp",
+  "cat": "structs",
+  "blurb": "A class hierarchy via composition: Car owns an Engine and Wheels as member objects and delegates to their methods \u2014 exercises nested member-object construction, delegated method calls, and access to sub-object state."
+ },
+ {
+  "file": "traffic_light_fsm.c",
+  "cat": "structs",
+  "blurb": "An enum + struct state machine: a traffic light whose phase advances through RED/GREEN/YELLOW with per-state durations and a cycle counter \u2014 exercises enum-driven switch dispatch, struct-pointer mutation, and modular state transition."
+ },
+ {
+  "file": "linked_list_sum.c",
+  "cat": "pointers",
+  "blurb": "Singly linked list with heap nodes: push-front, length, sum via pointer chasing \u2014 exercises malloc/free, struct self-reference, and pointer-walk loops the decompiler must rebuild as a list traversal."
+ },
+ {
+  "file": "array_stack.cpp",
+  "cat": "pointers",
+  "blurb": "Fixed-capacity array-backed stack (no heap): push/pop with a top index and bounds checks \u2014 exercises struct field access, static member constant, and reference-parameter mutation."
+ },
+ {
+  "file": "bst_inorder_count.cpp",
+  "cat": "pointers",
+  "blurb": "Binary search tree: recursive insert + recursive inorder traversal counting nodes and summing keys \u2014 exercises recursion, two-child pointer dispatch, and reference accumulators the decompiler must structure."
+ },
+ {
+  "file": "hash_bucket_count.c",
+  "cat": "pointers",
+  "blurb": "Hash bucket histogram: multiplicative-mix hash of uint32 keys into fixed buckets, then count loads and find the busiest \u2014 exercises bit-mix arithmetic, modulo, and array-indexed accumulation."
+ },
+ {
+  "file": "pointer_walk_swap.c",
+  "cat": "pointers",
+  "blurb": "Pointer-walk over an array with a moving pointer for the sum, plus in-place reverse using a swap-by-pointer helper \u2014 exercises pointer arithmetic, two-pointer convergence, and deref swaps."
+ },
+ {
+  "file": "fnptr_dispatch.cpp",
+  "cat": "pointers",
+  "blurb": "Function-pointer dispatch table: an opcode/lhs/rhs bytecode program selects an int binary op from a name+fnptr table and accumulates results \u2014 exercises function pointers, indirect calls, and table-driven control flow."
+ },
+ {
+  "file": "quicksort_demo.c",
+  "cat": "algos",
+  "blurb": "Recursive in-place quicksort (Lomuto partition) over a fixed int array; exercises nested recursion, pointer swaps, and a partition loop"
+ },
+ {
+  "file": "edit_distance.cpp",
+  "cat": "algos",
+  "blurb": "Levenshtein edit distance via rolling 1-D DP rows; exercises std::vector, std::min nesting, and row-swap DP control flow"
+ },
+ {
+  "file": "sieve_primes.c",
+  "cat": "algos",
+  "blurb": "Sieve of Eratosthenes up to 100; exercises a byte bitmap, nested loops with p*p start, and a long-cast overflow guard"
+ },
+ {
+  "file": "word_count.cpp",
+  "cat": "algos",
+  "blurb": "Tokenizer + word-frequency table over a fixed paragraph, sorted by count via a lambda comparator; exercises char-class branching, struct vector, and std::sort"
+ },
+ {
+  "file": "base_convert.c",
+  "cat": "algos",
+  "blurb": "Integer-to-string base conversion (binary/octal/hex) done by hand with a digit reversal buffer; exercises modulo loops, a lookup table, and uint32_t casts"
+ },
+ {
+  "file": "rpn_eval.cpp",
+  "cat": "algos",
+  "blurb": "Stack-based RPN/postfix evaluator over whitespace tokens with an error path; exercises a vector-as-stack, istringstream tokenizing, and operator dispatch"
+ },
+ {
+  "file": "argparse_cli.c",
+  "cat": "realish",
+  "blurb": "Tiny CLI argument parser (flags + value-options + positional); exercises argv loops, strcmp chains, atoi, branchy flag dispatch and a counted output loop."
+ },
+ {
+  "file": "temp_convert.cpp",
+  "cat": "realish",
+  "blurb": "Temperature + distance unit converter; exercises std::string dispatch, NaN sentinels, floating-point arithmetic helpers and an argv-vs-demo-table branch."
+ },
+ {
+  "file": "grade_stats.cpp",
+  "cat": "realish",
+  "blurb": "Grade/stats calculator over a fixed vector (mean/min/max/stddev + letter-grade histogram); exercises range-for reductions, sqrt, and an array-indexed bucket count."
+ },
+ {
+  "file": "cipher_demo.c",
+  "cat": "realish",
+  "blurb": "Caesar + XOR cipher over a fixed string with round-trip self-check; exercises modular char arithmetic, uint8 XOR over a buffer, hex dump loop and strcmp verification."
+ },
+ {
+  "file": "vending_fsm.cpp",
+  "cat": "realish",
+  "blurb": "Finite-state machine: a vending machine driven by a fixed event tape; exercises enum-class state transitions, a struct-of-events vector, and state-gated dispense/reject branching."
+ },
+ {
+  "file": "bytecode_vm.c",
+  "cat": "realish",
+  "blurb": "Mini stack-machine interpreter running a fixed bytecode program; exercises an opcode switch dispatch loop, an instruction pointer, a value stack, and a computed return code."
+ },
+ {
+  "file": "p1_ternary_union.cpp",
+  "cat": "edge",
+  "blurb": "Nested ternaries (4-deep) + tagged union with enum class type tag \u2014 exercises chained cmov/branch lowering and union member punning by tag."
+ },
+ {
+  "file": "p2_bitfields.c",
+  "cat": "edge",
+  "blurb": "Packed 32-bit bitfield struct (5/6/5/4/12) with masking, xor and overflow assign \u2014 exercises shift/and/or bitfield extract-insert lowering and width truncation."
+ },
+ {
+  "file": "p3_mini_format.c",
+  "cat": "edge",
+  "blurb": "Varargs-free printf-style formatter: char-by-char format state machine + manual itoa over a parallel int array into a fixed buffer \u2014 exercises loop/branch control flow and pointer-offset writes."
+ },
+ {
+  "file": "p4_enum_switch.cpp",
+  "cat": "edge",
+  "blurb": "Enum-driven switch returning string literals, with an intentional DIV/MOD fallthrough group \u2014 exercises jump-table vs if-chain lowering and shared case blocks."
+ },
+ {
+  "file": "p5_constfold.cpp",
+  "cat": "edge",
+  "blurb": "Heavy const-folding: constexpr fact/fib/gcd + a folded loop blob, consumed by static_asserts \u2014 the recursive/iterative bodies vanish into baked literals at the call sites."
+ },
+ {
+  "file": "p6_ptr_grid.c",
+  "cat": "edge",
+  "blurb": "Pointer arithmetic with reinterpret casts (byte buffer read as uint32 via w+i) plus a true 2D array parameter int g[ROWS][COLS] \u2014 exercises scaled-index addressing and 2D row-stride decay."
+ }
+]

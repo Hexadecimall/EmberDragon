@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# ember-gui-build — build the EmberDragon GUI for macOS (native) AND Windows
+# (cross-compiled from macOS via pullio's mingw toolchain). One Binary-Ninja-look
+# GUI, two backends, one shared OpenGL core (ember_gui.h).
+#
+#   ./ember-gui-build            both targets
+#   ./ember-gui-build mac        macOS only   → ./ember-gui
+#   ./ember-gui-build win        Windows only → ./ember-gui.exe
+set -eu
+here="$(cd "$(dirname "$0")" && pwd)"; cd "$here"
+what="${1:-both}"
+# `ai` anywhere on the command line => include the AI panel; builds a SEPARATE binary
+# (ember-gui-ai) so the DEFAULT build has NO AI GUI.  e.g. ./ember-gui-build mac ai
+AIFLAG=""; SUF=""
+for a in "$@"; do [ "$a" = "ai" ] && { AIFLAG="-DEMBER_AI"; SUF="-ai"; }; done
+[ "$what" = "ai" ] && what="both"
+
+build_mac(){
+  echo "🍎 macOS${AIFLAG:+ +AI}  (clang + Cocoa/OpenGL)…"
+  clang++ -std=c++17 -O2 -DGL_SILENCE_DEPRECATION $AIFLAG -x objective-c++ \
+    ember_gui_mac.mm -framework Cocoa -framework OpenGL -o "ember-gui$SUF"
+  file "ember-gui$SUF"
+}
+build_win(){
+  echo "🪟 Windows${AIFLAG:+ +AI}  (pullio --gcc → mingw, from macOS)…"
+  pullio --gcc cxx Win64 -i ember_gui_win.cpp -o "ember-gui$SUF.exe" --gui $AIFLAG \
+    -- -lopengl32 -lgdi32 -luser32 -lcomdlg32
+  file "ember-gui$SUF.exe"
+}
+case "$what" in
+  mac)  build_mac;;
+  win)  build_win;;
+  both) build_mac; echo; build_win;;
+  *) echo "usage: ember-gui-build [mac|win|both] [ai]" >&2; exit 2;;
+esac
+echo
+echo "run:  ./ember-gui <binary>            (macOS)"
+echo "      ember-gui.exe <binary>          (Windows)"

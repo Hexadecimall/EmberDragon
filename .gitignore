@@ -1,0 +1,6 @@
+# Python cache
+__pycache__/
+*.pyc
+.DS_Store
+# Junk dirs NXRT leaked when ember-gui.exe wrote to an untranslated Windows AppData path
+C:*

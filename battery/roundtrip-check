@@ -1,0 +1,24 @@
+#!/bin/zsh
+# roundtrip-check — the REAL metric for offline decompilation: for each battery program,
+# compile original -> run (capture stdout+exit); decompile with --collapse -> recompile ->
+# run; compare. A program "round-trips" only if the recompiled cleaned decompile produces
+# IDENTICAL output. Compiling is necessary but not sufficient — this catches semantic gaps
+# (leaked uninitialized registers, dropped args, lost dataflow) that mere compilation hides.
+cd "$(dirname "$0")"
+setopt NULL_GLOB
+ED=../emberdragon
+srcs=(); for d in src hard; do for f in $d/*.c $d/*.cpp; do [[ -f "$f" ]] && srcs+=("$f"); done; done
+match=0; compiles_wrong=0; nocompile=0; total=0; wronglist=()
+for src in $srcs; do
+  name="${src:t:r}"; total=$((total+1))
+  cc=clang++; std=-std=c++17; [[ "$src" == *.c ]] && { cc=clang; std=-std=c11; }
+  $cc $std -O0 "$src" -o "/tmp/o_$name" 2>/dev/null || { total=$((total-1)); continue; }
+  orig="$(/tmp/o_$name 2>/dev/null; echo X$?)"
+  $ED "/tmp/o_$name" --collapse > "/tmp/r_$name.cpp" 2>/dev/null
+  if clang++ -x c++ -std=c++17 -w "/tmp/r_$name.cpp" -o "/tmp/r_$name" 2>/dev/null; then
+    rt="$(/tmp/r_$name 2>/dev/null; echo X$?)"
+    if [[ "$orig" == "$rt" ]]; then match=$((match+1)); else compiles_wrong=$((compiles_wrong+1)); wronglist+=("$name"); fi
+  else nocompile=$((nocompile+1)); fi
+done
+echo "── roundtrip: $match correct / $compiles_wrong compile-but-wrong / $nocompile don't-compile  (of $total) ──"
+echo "COMPILE-BUT-WRONG: ${wronglist[@]}"

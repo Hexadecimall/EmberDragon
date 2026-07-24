@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# ember-app-bundle — package the EmberDragon GUI (+ its decompiler toolchain) into
+# a macOS .app and install it. The GUI runs `emberdragon` and the engines relative
+# to its own path, so the whole toolchain is bundled into Contents/MacOS/.
+#
+#   ember-app-bundle [--ai] [install-dir]      (default dir: ~/Applications)
+#
+#   --ai   build the SEPARATE AI variant (EmberDragon-AI.app) that bundles the
+#          Claude/Apple-model engines. The DEFAULT build is fully offline — no AI
+#          tools are shipped in it (per Gideon: "AI is only for the separate build").
+#
+# SAFETY: the install is atomic + reversible. We build into a staging dir, back the
+# CURRENT app up to ~/Applications/.emberdragon-backups/ BEFORE swapping, then swap.
+# A failed build never touches the installed app. Roll back with `ember-app-rollback`.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+
+WITH_AI=0; dest=""
+for a in "$@"; do case "$a" in --ai) WITH_AI=1;; *) dest="$a";; esac; done
+dest="${dest:-$HOME/Applications}"
+NAME="EmberDragon"; [ "$WITH_AI" = 1 ] && NAME="EmberDragon-AI"
+APP="$dest/$NAME.app"
+BK="$dest/.emberdragon-backups"
+echo "🔥🐉 packaging $NAME.app -> $APP  $([ "$WITH_AI" = 1 ] && echo '(AI variant)' || echo '(offline)')"
+
+# 1. (re)build the GUI + engines so the bundle is never stale.
+# The AI panel is a COMPILE-TIME split: `ember-gui-build mac ai` -> ember-gui-ai
+# (has the AI panel); plain `ember-gui` has none. The offline app must ship the
+# no-AI binary; the --ai app ships ember-gui-ai.
+GUIBIN="ember-gui"
+if [ "$WITH_AI" = 1 ]; then (cd "$here" && ./ember-gui-build mac ai >/dev/null 2>&1); GUIBIN="ember-gui-ai";
+else (cd "$here" && ./ember-gui-build mac >/dev/null 2>&1); fi
+for t in emberdragon ember-lift ember-arm64 ember-dis ember-collapse ember-sigs; do [ -x "$here/$t" ] || (cd "$here" && clang++ -std=c++17 -O2 "$t.cpp" -o "$t"); done
+
+# 2. render the app icon (ember mark on a dark rounded plate) -> AppIcon.icns
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+cat > "$tmp/icon.mm" <<'EOF'
+#import <Cocoa/Cocoa.h>
+#import <OpenGL/OpenGL.h>
+#import <OpenGL/gl.h>
+#import <OpenGL/glext.h>
+#include <cmath>
+#include <vector>
+static void quad(float x,float y,float w,float h,float r,float g,float b){glColor4f(r,g,b,1);glBegin(GL_QUADS);glVertex2f(x,y);glVertex2f(x+w,y);glVertex2f(x+w,y+h);glVertex2f(x,y+h);glEnd();}
+static void disc(float cx,float cy,float rad,float r,float g,float b){glColor4f(r,g,b,1);glBegin(GL_TRIANGLE_FAN);glVertex2f(cx,cy);for(int i=0;i<=72;i++){float t=i*6.2831853f/72;glVertex2f(cx+cosf(t)*rad,cy+sinf(t)*rad);}glEnd();}
+static void tri(float ax,float ay,float bx,float by,float cx,float cy,float r,float g,float b){glColor4f(r,g,b,1);glBegin(GL_TRIANGLES);glVertex2f(ax,ay);glVertex2f(bx,by);glVertex2f(cx,cy);glEnd();}
+static void rrect(float x,float y,float w,float h,float rad,float r,float g,float b){quad(x+rad,y,w-2*rad,h,r,g,b);quad(x,y+rad,w,h-2*rad,r,g,b);disc(x+rad,y+rad,rad,r,g,b);disc(x+w-rad,y+rad,rad,r,g,b);disc(x+rad,y+h-rad,rad,r,g,b);disc(x+w-rad,y+h-rad,rad,r,g,b);}
+int main(int argc,char**argv){ @autoreleasepool{
+  CGLPixelFormatAttribute a[]={kCGLPFAAccelerated,(CGLPixelFormatAttribute)0};CGLPixelFormatObj px;GLint n;CGLChoosePixelFormat(a,&px,&n);CGLContextObj ctx;CGLCreateContext(px,0,&ctx);CGLSetCurrentContext(ctx);
+  int S=2048; GLuint fb,rb;glGenFramebuffersEXT(1,&fb);glBindFramebufferEXT(GL_FRAMEBUFFER_EXT,fb);glGenRenderbuffersEXT(1,&rb);glBindRenderbufferEXT(GL_RENDERBUFFER_EXT,rb);
+  glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT,GL_RGBA8,S,S);glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT,GL_COLOR_ATTACHMENT0_EXT,GL_RENDERBUFFER_EXT,rb);
+  glViewport(0,0,S,S);glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,S,S,0,-1,1);glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+  glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);
+  float m=S*0.055f;
+  rrect(m,m,S-2*m,S-2*m,S*0.205f, 0.102f,0.106f,0.129f);            // dark rounded plate
+  rrect(m+S*0.012f,m+S*0.012f,S-2*m-S*0.024f,S-2*m-S*0.024f,S*0.185f, 0.137f,0.141f,0.165f); // inset bevel
+  float cx=S*0.5f, cy=S*0.57f, R=S*0.215f;
+  tri(cx,S*0.215f, cx-R*1.05f,cy-R*0.05f, cx+R*1.05f,cy-R*0.05f, 0.847f,0.337f,0.616f); // pink dragon/flame head
+  disc(cx,cy,R, 1.0f,0.553f,0.176f);                                // ember disc (orange)
+  disc(cx+R*0.30f,cy-R*0.28f,R*0.18f, 0.102f,0.106f,0.129f);        // eye
+  glFinish();
+  std::vector<unsigned char> p(S*S*4),f(S*S*4); glReadPixels(0,0,S,S,GL_RGBA,GL_UNSIGNED_BYTE,p.data());
+  for(int y=0;y<S;y++) memcpy(&f[y*S*4],&p[(S-1-y)*S*4],S*4);       // GL bottom-up -> top-down
+  NSBitmapImageRep* rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:S pixelsHigh:S bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:S*4 bitsPerPixel:32];
+  memcpy([rep bitmapData],f.data(),(size_t)S*S*4);
+  NSData* png=[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+  [png writeToFile:[NSString stringWithUTF8String:argv[1]] atomically:YES];
+} return 0; }
+EOF
+clang++ -std=c++17 -O2 -DGL_SILENCE_DEPRECATION -x objective-c++ "$tmp/icon.mm" -framework Cocoa -framework OpenGL -o "$tmp/icongen"
+"$tmp/icongen" "$tmp/master.png"
+# if the user dropped real art at assets/logo.png, crop the dragon emblem onto the rounded plate instead.
+# crop is tunable: EMBER_CROP_SIDE / EMBER_CROP_CX / EMBER_CROP_CY (fractions of the image; CY from the top).
+if [ -f "$here/assets/logo.png" ]; then
+  cat > "$tmp/logo.mm" <<'EOF'
+#import <Cocoa/Cocoa.h>
+#include <cstdlib>
+static double envf(const char* k, double d){ const char* v=getenv(k); return v?atof(v):d; }
+int main(int c,char**v){ @autoreleasepool {
+  NSImage* img=[[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:v[1]]];
+  if(!img){ return 1; }
+  CGImageRef src=[img CGImageForProposedRect:NULL context:nil hints:nil];
+  double iw=CGImageGetWidth(src), ih=CGImageGetHeight(src), aspect=iw/ih;
+  CGImageRef use=src;
+  if(aspect>1.4||aspect<0.65){ double side=envf("EMBER_CROP_SIDE",0.58)*ih, cx=envf("EMBER_CROP_CX",0.50)*iw, cy=envf("EMBER_CROP_CY",0.39)*ih;  // wide/tall banner -> crop emblem (CY from top)
+    if(side>iw)side=iw; double rx=cx-side/2, ry=cy-side/2; if(rx<0)rx=0; if(ry<0)ry=0; if(rx+side>iw)rx=iw-side; if(ry+side>ih)ry=ih-side;
+    use=CGImageCreateWithImageInRect(src, CGRectMake(rx,ry,side,side)); }                  // else: already an emblem, place as-is (keeps transparency)
+  int S=2048; CGColorSpaceRef cs=CGColorSpaceCreateDeviceRGB();
+  CGContextRef ctx=CGBitmapContextCreate(NULL,S,S,8,S*4,cs,kCGImageAlphaPremultipliedLast);
+  CGContextSetInterpolationQuality(ctx,kCGInterpolationHigh); CGContextClearRect(ctx,CGRectMake(0,0,S,S));
+  double m=S*0.055,r=S*0.205; CGRect plate=CGRectMake(m,m,S-2*m,S-2*m);
+  CGPathRef p=CGPathCreateWithRoundedRect(plate,r,r,NULL);
+  CGContextAddPath(ctx,p); CGContextSetRGBFillColor(ctx,0.102,0.106,0.129,1); CGContextFillPath(ctx);
+  CGContextAddPath(ctx,p); CGContextClip(ctx);
+  double inset=S*envf("EMBER_INSET",0.12), D=S-2*inset, uw=CGImageGetWidth(use), uh=CGImageGetHeight(use);
+  double dw,dh; if(uw>=uh){ dw=D; dh=D*uh/uw; } else { dh=D; dw=D*uw/uh; }                  // fit into the plate, preserve aspect
+  CGContextDrawImage(ctx, CGRectMake((S-dw)/2,(S-dh)/2,dw,dh), use);
+  CGImageRef out=CGBitmapContextCreateImage(ctx);
+  NSBitmapImageRep* rep=[[NSBitmapImageRep alloc] initWithCGImage:out];
+  NSData* png=[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+  [png writeToFile:[NSString stringWithUTF8String:v[2]] atomically:YES]; }
+  return 0; }
+EOF
+  clang++ -std=c++17 -O2 -x objective-c++ "$tmp/logo.mm" -framework Cocoa -framework CoreGraphics -o "$tmp/logogen" 2>/dev/null \
+    && "$tmp/logogen" "$here/assets/logo.png" "$tmp/master.png" && echo "  using assets/logo.png for the icon"
+fi
+set="$tmp/EmberDragon.iconset"; mkdir -p "$set"
+for sz in 16 32 128 256 512; do
+  sips -z $sz $sz       "$tmp/master.png" --out "$set/icon_${sz}x${sz}.png"    >/dev/null
+  sips -z $((sz*2)) $((sz*2)) "$tmp/master.png" --out "$set/icon_${sz}x${sz}@2x.png" >/dev/null
+done
+iconutil -c icns "$set" -o "$tmp/AppIcon.icns"
+
+# 3. assemble the bundle into a STAGING dir (never touch the installed app until it's whole)
+STAGE="$tmp/$NAME.app"
+mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
+cp "$here/$GUIBIN" "$STAGE/Contents/MacOS/ember-gui"   # the bundle's exec is always named ember-gui (AI variant = ember-gui-ai)
+
+# core offline engines — always shipped
+CORE="emberdragon ember-lift ember-arm64 ember-dis ember-collapse ember-sigs"
+# THE ai stuff — only in the --ai variant: ember-claude, the claude-CLI rewrite that
+# powers Analyze / Clean Up. (rename/ask/ai/apple/local are NOT bundled here.)
+AI="ember-claude"
+ENGINES="$CORE"; [ "$WITH_AI" = 1 ] && ENGINES="$CORE $AI"
+for t in $ENGINES; do [ -e "$here/$t" ] && cp "$here/$t" "$STAGE/Contents/MacOS/$t"; done
+
+# bundle NXRT so EmberRun runs foreign (PE/ELF) binaries with no external install
+NXSRC=""; for c in "/usr/local/bin/nxrt" "$HOME/.local/bin/nxrt"; do [ -x "$c" ] && NXSRC="$c" && break; done
+if [ -n "$NXSRC" ]; then cp "$NXSRC" "$STAGE/Contents/MacOS/nxrt"; echo "  bundled nxrt ($(wc -c <"$NXSRC") bytes) — EmberRun is self-contained"; else echo "  (no nxrt found; EmberRun will fall back to a system nxrt at runtime)"; fi
+
+# bundle a code font so text rendering never depends on system fonts moving
+for FT in /System/Library/Fonts/Menlo.ttc /System/Library/Fonts/SFNSMono.ttf; do
+  [ -f "$FT" ] && cp "$FT" "$STAGE/Contents/Resources/$(basename "$FT")" && echo "  bundled font $(basename "$FT")" && break
+done
+
+chmod +x "$STAGE/Contents/MacOS/"*
+cp "$tmp/AppIcon.icns" "$STAGE/Contents/Resources/AppIcon.icns"
+[ -f "$here/assets/logo.png" ] && cp "$here/assets/logo.png" "$STAGE/Contents/Resources/logo.png"   # in-app logo (home + toolbar)
+# ship the FLIRT signature DB so the tool is self-contained — recognizes known functions out of the box.
+SDB="$HOME/Library/Application Support/EmberDragon/sigs.db"; [ -f "$here/assets/seed.db" ] && SDB="$here/assets/seed.db"
+[ -f "$SDB" ] && cp "$SDB" "$STAGE/Contents/Resources/sigs.db" && echo "  bundled FLIRT sigs.db ($(wc -c <"$SDB") bytes)"
+cat > "$STAGE/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleIdentifier</key><string>com.gideoncox.${NAME//-/}</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleExecutable</key><string>ember-gui</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+</dict></plist>
+PLIST
+
+# ad-hoc sign the STAGED app so Gatekeeper lets it run. Strip xattrs first —
+# cp carries com.apple.provenance onto the binaries and codesign rejects it
+# ("resource fork, Finder information, or similar detritus not allowed").
+xattr -cr "$STAGE" >/dev/null 2>&1 || true
+codesign --force --deep -s - "$STAGE" >/dev/null 2>&1 || true
+
+# 4. ATOMIC INSTALL with rollback: back up the current app, then swap the staged one in
+mkdir -p "$BK"
+if [ -d "$APP" ]; then
+  ts="$(date +%Y%m%d-%H%M%S)"
+  echo "  backing up current app -> $BK/$NAME-$ts.app"
+  rm -rf "$BK/$NAME-$ts.app"; cp -R "$APP" "$BK/$NAME-$ts.app"
+  # keep the newest 5 backups for THIS variant, prune the rest. The grep filters out the
+  # other variant ("EmberDragon-" is a prefix of "EmberDragon-AI-") so they don't cross-prune.
+  ls -dt "$BK/$NAME-"*.app 2>/dev/null | grep -E "/$NAME-([0-9]|prerollback)" | tail -n +6 | while read -r old; do rm -rf "$old"; done
+fi
+rm -rf "$APP.swap"; mv "$STAGE" "$APP.swap"        # move staged app to the install dir (same volume = atomic rename)
+rm -rf "$APP"; mv "$APP.swap" "$APP"               # swap into place
+touch "$APP"
+echo "✅ installed: $APP"
+echo "   rollback any time with:  ember-app-rollback $([ "$WITH_AI" = 1 ] && echo --ai)"

@@ -1,0 +1,146 @@
+[
+ {
+  "file": "dijkstra.cpp",
+  "cat": "graphs",
+  "opt": "O2",
+  "blurb": "Dijkstra shortest path on a weighted adjacency-list graph using a std::priority_"
+ },
+ {
+  "file": "bfs_dfs.cpp",
+  "cat": "graphs",
+  "opt": "O0",
+  "blurb": "BFS and DFS over a dense adjacency-matrix graph: BFS with an explicit std::queue"
+ },
+ {
+  "file": "toposort.cpp",
+  "cat": "graphs",
+  "opt": "O2",
+  "blurb": "Topological sort of a DAG two independent ways: Kahn's algorithm (BFS on indegre"
+ },
+ {
+  "file": "maze_unionfind.cpp",
+  "cat": "graphs",
+  "opt": "O2",
+  "blurb": "Weighted union-find (disjoint set) with union-by-rank and path-halving find, app"
+ },
+ {
+  "file": "shapes.cpp",
+  "cat": "cpp_oop",
+  "opt": "O2",
+  "blurb": "Polymorphic shape hierarchy: an abstract Shape base with 3 derived classes (Circ"
+ },
+ {
+  "file": "complexmat.cpp",
+  "cat": "cpp_oop",
+  "opt": "O2",
+  "blurb": "Operator-overload-heavy linear algebra: a Complex struct overloading +,-,*,/,una"
+ },
+ {
+  "file": "arena.cpp",
+  "cat": "cpp_oop",
+  "opt": "O0",
+  "blurb": "RAII resource management: a move-only Buffer (deleted copy, noexcept move ctor/a"
+ },
+ {
+  "file": "ringbuf.cpp",
+  "cat": "cpp_oop",
+  "opt": "O2",
+  "blurb": "Class template instantiated for two distinct types: RingBuffer<T,N> (overwriting"
+ },
+ {
+  "file": "expr.cpp",
+  "cat": "parsers",
+  "opt": "O2",
+  "blurb": "Recursive-descent arithmetic parser+evaluator with full precedence: +/- (term), "
+ },
+ {
+  "file": "jsontok.cpp",
+  "cat": "parsers",
+  "opt": "O2",
+  "blurb": "Tiny JSON-ish tokenizer. A Lexer struct splits a fixed embedded document into a "
+ },
+ {
+  "file": "glob.cpp",
+  "cat": "parsers",
+  "opt": "O2",
+  "blurb": "Glob/wildcard matcher supporting * (any run incl. empty), ? (single char), and ["
+ },
+ {
+  "file": "base64.cpp",
+  "cat": "parsers",
+  "opt": "O0",
+  "blurb": "RFC 4648 base64 encoder + decoder with a self-verifying round-trip. encode() han"
+ },
+ {
+  "file": "heap.cpp",
+  "cat": "ds",
+  "opt": "O0",
+  "blurb": "Binary min-heap priority queue (1-based array) with a key->index position map en"
+ },
+ {
+  "file": "hashmap.cpp",
+  "cat": "ds",
+  "opt": "O2",
+  "blurb": "Open-addressing hash map using Robin Hood probing (steal-from-the-rich displacem"
+ },
+ {
+  "file": "trie.cpp",
+  "cat": "ds",
+  "opt": "O2",
+  "blurb": "Arena-allocated 26-way (a..z) trie tracking both passing-count and ending-count "
+ },
+ {
+  "file": "avl.cpp",
+  "cat": "ds",
+  "opt": "O2",
+  "blurb": "Self-balancing AVL tree over a flat node pool (index-based left/right), with sin"
+ },
+ {
+  "file": "arena_systems.cpp",
+  "cat": "systems",
+  "opt": "O2",
+  "blurb": "Fixed-size templated arena/bump allocator (Arena<Capacity>) that hands out align"
+ },
+ {
+  "file": "ring.cpp",
+  "cat": "systems",
+  "opt": "O2",
+  "blurb": "Single-thread SPSC-style ring buffer (RingBuffer<T,N>) with a power-of-two capac"
+ },
+ {
+  "file": "bytecode_vm.cpp",
+  "cat": "systems",
+  "opt": "O2",
+  "blurb": "Stack-based bytecode VM with 18 opcodes spanning stack ops (PUSH/POP/DUP), arith"
+ },
+ {
+  "file": "scheduler.cpp",
+  "cat": "systems",
+  "opt": "O0",
+  "blurb": "Tiny cooperative scheduler over raw function pointers plus a fixed state array. "
+ },
+ {
+  "file": "fft.cpp",
+  "cat": "numeric",
+  "opt": "O2",
+  "blurb": "Iterative radix-2 Cooley-Tukey FFT on a fixed 16-point signal: bit-reversal perm"
+ },
+ {
+  "file": "matinv.cpp",
+  "cat": "numeric",
+  "opt": "O2",
+  "blurb": "4x4 matrix inverse via Gauss-Jordan elimination with partial pivoting: builds [A"
+ },
+ {
+  "file": "mandelbrot.cpp",
+  "cat": "numeric",
+  "opt": "O2",
+  "blurb": "Pure-integer Mandelbrot escape-count grid: Q16.16 fixed-point coordinates and it"
+ },
+ {
+  "file": "nnforward.cpp",
+  "cat": "numeric",
+  "opt": "O0",
+  "blurb": "Small MLP forward pass over baked-in weights: 4->6->5->3 dense layers with ReLU "
+ }
+]

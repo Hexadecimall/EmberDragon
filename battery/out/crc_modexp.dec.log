@@ -1,0 +1,5 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling crc32
+  decompiling mod_pow
+ember-arm64: 3 user function(s) decompiled, 0 library function(s) skipped

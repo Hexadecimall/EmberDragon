@@ -1,0 +1,11 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling BankAccount
+  decompiling deposit
+  decompiling withdraw
+  decompiling owner
+  decompiling balance
+  decompiling BankAccount_dtor
+  decompiling BankAccount
+  decompiling BankAccount_dtor
+ember-arm64: 9 user function(s) decompiled, 47 library function(s) skipped

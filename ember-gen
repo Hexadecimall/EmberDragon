@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+# ember-gen — deterministic generator of DIVERSE, intent-LABELED C++ programs for the
+# decompiler's similarity corpus. Each emitted function is named  <intent>_<type>_<tag>
+# so the INTENT LABEL is recoverable as the leading token (everything before the type).
+# A small library of templated algorithms x types x variants yields, across seeds,
+# hundreds of thousands of distinct compiled functions — the corpus the matcher compares
+# unknown binaries against to recover "what is it actually trying to do".
+#
+#   ember-gen <seed> [outfile.cpp]      # deterministic per seed; stdout if no outfile
+#   ember-gen --labels                  # print every intent label this generator can emit
+#
+# No deps beyond python3 stdlib (a build-time tool, not a shipped dependency).
+import sys, random, re, json
+
+# ── type families. each template is instantiated per applicable type. ──
+INT_T   = ["int", "long", "unsigned", "long long", "short"]
+REAL_T  = ["float", "double"]
+ALL_NUM = INT_T + REAL_T
+
+# Each template: (intent, kinds, fn(T, name)->source). `kinds` selects the type pool.
+# `name` is the full unique function name; the intent label is name.split the type off.
+TEMPLATES = []
+def tpl(intent, kinds):
+    def deco(f): TEMPLATES.append((intent, kinds, f)); return f
+    return deco
+
+# ---- sorting ----
+@tpl("bubble_sort", "int+real")
+def _bubble(T, n): return f"""void {n}({T}* a, int n){{ for(int i=0;i<n-1;i++) for(int j=0;j<n-1-i;j++) if(a[j]>a[j+1]){{ {T} t=a[j]; a[j]=a[j+1]; a[j+1]=t; }} }}"""
+@tpl("insertion_sort", "int+real")
+def _ins(T, n): return f"""void {n}({T}* a, int n){{ for(int i=1;i<n;i++){{ {T} k=a[i]; int j=i-1; while(j>=0&&a[j]>k){{ a[j+1]=a[j]; j--; }} a[j+1]=k; }} }}"""
+@tpl("selection_sort", "int+real")
+def _sel(T, n): return f"""void {n}({T}* a, int n){{ for(int i=0;i<n-1;i++){{ int m=i; for(int j=i+1;j<n;j++) if(a[j]<a[m]) m=j; {T} t=a[i]; a[i]=a[m]; a[m]=t; }} }}"""
+@tpl("quick_partition", "int")
+def _part(T, n): return f"""int {n}({T}* a, int lo, int hi){{ {T} p=a[hi]; int i=lo-1; for(int j=lo;j<hi;j++) if(a[j]<p){{ i++; {T} t=a[i]; a[i]=a[j]; a[j]=t; }} {T} t=a[i+1]; a[i+1]=a[hi]; a[hi]=t; return i+1; }}"""
+
+# ---- searching ----
+@tpl("linear_search", "int+real")
+def _lin(T, n): return f"""int {n}(const {T}* a, int n, {T} key){{ for(int i=0;i<n;i++) if(a[i]==key) return i; return -1; }}"""
+@tpl("binary_search", "int")
+def _bin(T, n): return f"""int {n}(const {T}* a, int n, {T} key){{ int lo=0, hi=n-1; while(lo<=hi){{ int m=(lo+hi)/2; if(a[m]==key) return m; if(a[m]<key) lo=m+1; else hi=m-1; }} return -1; }}"""
+@tpl("find_max", "int+real")
+def _fmax(T, n): return f"""{T} {n}(const {T}* a, int n){{ {T} m=a[0]; for(int i=1;i<n;i++) if(a[i]>m) m=a[i]; return m; }}"""
+@tpl("find_min", "int+real")
+def _fmin(T, n): return f"""{T} {n}(const {T}* a, int n){{ {T} m=a[0]; for(int i=1;i<n;i++) if(a[i]<m) m=a[i]; return m; }}"""
+
+# ---- numeric / math ----
+@tpl("gcd", "int")
+def _gcd(T, n): return f"""{T} {n}({T} a, {T} b){{ while(b){{ {T} t=b; b=a%b; a=t; }} return a; }}"""
+@tpl("factorial", "int")
+def _fact(T, n): return f"""{T} {n}({T} k){{ {T} r=1; for({T} i=2;i<=k;i++) r*=i; return r; }}"""
+@tpl("fibonacci", "int")
+def _fib(T, n): return f"""{T} {n}(int k){{ {T} a=0,b=1; for(int i=0;i<k;i++){{ {T} t=a+b; a=b; b=t; }} return a; }}"""
+@tpl("is_prime", "int")
+def _prime(T, n): return f"""int {n}({T} v){{ if(v<2) return 0; for({T} i=2;i*i<=v;i++) if(v%i==0) return 0; return 1; }}"""
+@tpl("power", "int")
+def _pow(T, n): return f"""{T} {n}({T} base, int e){{ {T} r=1; while(e>0){{ if(e&1) r*=base; base*=base; e>>=1; }} return r; }}"""
+@tpl("sum_to_n", "int")
+def _sumn(T, n): return f"""{T} {n}({T} k){{ {T} s=0; for({T} i=1;i<=k;i++) s+=i; return s; }}"""
+@tpl("isqrt", "int")
+def _isqrt(T, n): return f"""{T} {n}({T} v){{ {T} x=v, y=(x+1)/2; while(y<x){{ x=y; y=(x+v/x)/2; }} return x; }}"""
+@tpl("collatz_steps", "int")
+def _coll(T, n): return f"""int {n}({T} v){{ int s=0; while(v!=1){{ v = (v&1)? 3*v+1 : v/2; s++; }} return s; }}"""
+@tpl("abs_val", "int+real")
+def _abs(T, n): return f"""{T} {n}({T} v){{ return v<0 ? -v : v; }}"""
+
+# ---- bit manipulation ----
+@tpl("popcount", "uint")
+def _pop(T, n): return f"""int {n}({T} v){{ int c=0; while(v){{ v&=v-1; c++; }} return c; }}"""
+@tpl("reverse_bits", "uint")
+def _revb(T, n): return f"""{T} {n}({T} v){{ {T} r=0; for(int i=0;i<32;i++){{ r=(r<<1)|(v&1); v>>=1; }} return r; }}"""
+@tpl("is_power_of_two", "uint")
+def _p2(T, n): return f"""int {n}({T} v){{ return v && !(v & (v-1)); }}"""
+@tpl("parity", "uint")
+def _par(T, n): return f"""int {n}({T} v){{ int p=0; while(v){{ p^=1; v&=v-1; }} return p; }}"""
+@tpl("count_trailing_zeros", "uint")
+def _ctz(T, n): return f"""int {n}({T} v){{ if(!v) return 32; int c=0; while(!(v&1)){{ v>>=1; c++; }} return c; }}"""
+
+# ---- array reductions ----
+@tpl("array_sum", "int+real")
+def _asum(T, n): return f"""{T} {n}(const {T}* a, int n){{ {T} s=0; for(int i=0;i<n;i++) s+=a[i]; return s; }}"""
+@tpl("dot_product", "int+real")
+def _dot(T, n): return f"""{T} {n}(const {T}* a, const {T}* b, int n){{ {T} s=0; for(int i=0;i<n;i++) s+=a[i]*b[i]; return s; }}"""
+@tpl("mean", "real")
+def _mean(T, n): return f"""{T} {n}(const {T}* a, int n){{ {T} s=0; for(int i=0;i<n;i++) s+=a[i]; return s/n; }}"""
+@tpl("max_subarray", "int")
+def _kad(T, n): return f"""{T} {n}(const {T}* a, int n){{ {T} best=a[0], cur=a[0]; for(int i=1;i<n;i++){{ cur = a[i] > cur+a[i] ? a[i] : cur+a[i]; if(cur>best) best=cur; }} return best; }}"""
+@tpl("count_occurrences", "int")
+def _cnt(T, n): return f"""int {n}(const {T}* a, int n, {T} key){{ int c=0; for(int i=0;i<n;i++) if(a[i]==key) c++; return c; }}"""
+@tpl("reverse_array", "int+real")
+def _rev(T, n): return f"""void {n}({T}* a, int n){{ for(int i=0,j=n-1;i<j;i++,j--){{ {T} t=a[i]; a[i]=a[j]; a[j]=t; }} }}"""
+
+# ---- strings (char*) ----
+@tpl("strlen2", "char")
+def _slen(T, n): return f"""int {n}(const char* s){{ int i=0; while(s[i]) i++; return i; }}"""
+@tpl("palindrome_check", "char")
+def _pal(T, n): return f"""int {n}(const char* s, int n){{ for(int i=0,j=n-1;i<j;i++,j--) if(s[i]!=s[j]) return 0; return 1; }}"""
+@tpl("to_upper", "char")
+def _upr(T, n): return f"""void {n}(char* s){{ for(int i=0;s[i];i++) if(s[i]>='a'&&s[i]<='z') s[i]-=32; }}"""
+@tpl("djb2_hash", "char")
+def _djb(T, n): return f"""unsigned {n}(const char* s){{ unsigned h=5381; while(*s){{ h=((h<<5)+h)+(unsigned char)*s++; }} return h; }}"""
+@tpl("fnv_hash", "char")
+def _fnv(T, n): return f"""unsigned {n}(const char* s){{ unsigned h=2166136261u; while(*s){{ h=(h^(unsigned char)*s++)*16777619u; }} return h; }}"""
+@tpl("xor_cipher", "char")
+def _xor(T, n): return f"""void {n}(char* s, int n, char k){{ for(int i=0;i<n;i++) s[i]^=k; }}"""
+
+# ---- linked list (self-defined node) ----
+@tpl("list_length", "node")
+def _llen(T, n): return f"""struct N_{n}{{ {T} v; N_{n}* next; }}; int {n}(N_{n}* h){{ int c=0; while(h){{ c++; h=h->next; }} return c; }}"""
+@tpl("list_sum", "node")
+def _lsum(T, n): return f"""struct M_{n}{{ {T} v; M_{n}* next; }}; {T} {n}(M_{n}* h){{ {T} s=0; while(h){{ s+=h->v; h=h->next; }} return s; }}"""
+
+# ---- matrix ----
+@tpl("matrix_trace", "int+real")
+def _tr(T, n): return f"""{T} {n}(const {T}* m, int n){{ {T} s=0; for(int i=0;i<n;i++) s+=m[i*n+i]; return s; }}"""
+@tpl("matrix_transpose", "int+real")
+def _trn(T, n): return f"""void {n}({T}* d, const {T}* s, int n){{ for(int i=0;i<n;i++) for(int j=0;j<n;j++) d[j*n+i]=s[i*n+j]; }}"""
+
+# ---- geometry ----
+@tpl("distance2", "real")
+def _d2(T, n): return f"""{T} {n}({T} x1, {T} y1, {T} x2, {T} y2){{ {T} dx=x2-x1, dy=y2-y1; return dx*dx+dy*dy; }}"""
+@tpl("clamp", "int+real")
+def _clamp(T, n): return f"""{T} {n}({T} v, {T} lo, {T} hi){{ return v<lo ? lo : (v>hi ? hi : v); }}"""
+
+# ---- checksum / encoding ----
+@tpl("checksum_sum", "char")
+def _chk(T, n): return f"""unsigned {n}(const unsigned char* d, int n){{ unsigned s=0; for(int i=0;i<n;i++) s+=d[i]; return s; }}"""
+@tpl("crc8", "char")
+def _crc(T, n): return f"""unsigned char {n}(const unsigned char* d, int n){{ unsigned char c=0; for(int i=0;i<n;i++){{ c^=d[i]; for(int b=0;b<8;b++) c = (c&0x80)? (c<<1)^0x07 : c<<1; }} return c; }}"""
+
+def kinds_to_types(kinds):
+    pool = []
+    if kinds in ("int+real","all"): pool = INT_T[:3] + REAL_T
+    elif kinds == "int":  pool = INT_T[:3]
+    elif kinds == "real": pool = REAL_T
+    elif kinds == "uint": pool = ["unsigned", "unsigned long", "unsigned long long"]
+    elif kinds == "char": pool = ["char"]        # type irrelevant; one instance
+    elif kinds == "node": pool = INT_T[:2]
+    else: pool = ["int"]
+    return pool
+
+def all_labels():
+    return sorted({t[0] for t in TEMPLATES})
+
+def gen(seed):
+    rng = random.Random(seed)
+    # pick a randomized subset of templates so each file is distinct and compiles fast
+    chosen = rng.sample(TEMPLATES, k=rng.randint(10, min(22, len(TEMPLATES))))
+    out = ["// ember-gen seed=%d — intent-labeled corpus program (function name prefix = intent)" % seed]
+    used = set()
+    for intent, kinds, f in chosen:
+        types = kinds_to_types(kinds)
+        # instantiate for a random 1-2 of the applicable types
+        for T in rng.sample(types, k=min(len(types), rng.randint(1, 2))):
+            tag = "".join(ch if ch.isalnum() else "" for ch in T) or "v"
+            name = "%s__%s_%d" % (intent, tag, seed % 1000)   # double-underscore: label = name.split("__",1)[0]
+            if name in used: continue
+            used.add(name)
+            try: out.append(f(T, name))
+            except Exception: pass
+    return "\n".join(out) + "\n"
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h","--help"):
+        print("usage: ember-gen <seed> [outfile.cpp]   |   ember-gen --labels", file=sys.stderr); sys.exit(2)
+    if a[0] == "--labels":
+        print("\n".join(all_labels())); print("\n# %d intents x types x seeds -> the corpus" % len(all_labels()), file=sys.stderr); return
+    if a[0] == "--sig":
+        # emit per-function source signatures {name -> {ret, params:[{pos,name,type}], locals:[]}}
+        # — the GOLD param names the corpus join splices into records as src_sig.
+        sig_seed = int(a[1]); src = gen(sig_seed); sigs = {}
+        SIG_RE = re.compile(r'^\s*(?:static\s+)?([\w\s\*]+?)\s+([a-z_]+__[a-z0-9]+_\d+)\s*\(([^)]*)\)')
+        for line in src.splitlines():
+            m = SIG_RE.match(line)
+            if not m: continue
+            ret = m.group(1).strip(); name = m.group(2); params = []
+            for i, p in enumerate(x.strip() for x in m.group(3).split(',') if x.strip()):
+                if p == "void": continue
+                toks = p.replace("*", " * ").split()
+                params.append({"pos": i, "name": toks[-1], "type": " ".join(toks[:-1])})
+            sigs[name] = {"ret": ret, "params": params, "locals": []}
+        js = json.dumps(sigs)
+        if len(a) > 2: open(a[2], "w").write(js)
+        else: print(js)
+        return
+    seed = int(a[0]); src = gen(seed)
+    if len(a) > 1:
+        open(a[1], "w").write(src)
+    else:
+        sys.stdout.write(src)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,6 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling rect_translate
+  decompiling point_distance
+  decompiling rect_area
+ember-arm64: 4 user function(s) decompiled, 0 library function(s) skipped

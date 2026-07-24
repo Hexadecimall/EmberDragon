@@ -1,0 +1,8 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling fact
+  decompiling gcd
+  decompiling fib
+  decompiling ackermann
+  decompiling hanoi_moves
+ember-arm64: 6 user function(s) decompiled, 0 library function(s) skipped

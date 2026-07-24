@@ -1,0 +1,8 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling fx_div
+  decompiling fx_from_int
+  decompiling fx_mul
+  decompiling fx_sqrt
+  decompiling fx_to_int
+ember-arm64: 6 user function(s) decompiled, 0 library function(s) skipped

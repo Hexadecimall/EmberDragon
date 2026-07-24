@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# ember-ask — free-form "talk to Claude" for the EmberDragon AI panel chat.
+# Usage:  printf '%s' "$context_code" | ember-ask "your question"
+# The question is the -p prompt; whatever is piped on stdin (usually the current
+# decompiled function) is supplied as context. Powered by the local `claude` CLI
+# (claude -p) so NO API key is needed — it uses your existing Claude login. If the
+# CLI is missing or errors, prints a short, clear message instead of breaking.
+set -uo pipefail
+
+question="${1:-}"
+[ -n "$question" ] || { printf 'ask a question.\n'; exit 0; }
+
+claude="$(command -v claude 2>/dev/null || true)"
+if [ -z "$claude" ]; then
+  for p in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
+    [ -x "$p" ] && { claude="$p"; break; }
+  done
+fi
+if [ -z "$claude" ]; then
+  printf 'the `claude` CLI was not found — install it and log in to chat.\n'; exit 0
+fi
+
+context="$(cat)"
+sys='You are EmberDragon'"'"'s built-in reverse-engineering assistant, embedded in a from-scratch decompiler. The user is looking at decompiled C/C++. Answer their question directly and concisely. If decompiled code context is provided, ground your answer in it. Plain text, no markdown fences unless you are showing code.
+
+You can ACT on the decompilation with tool commands. When (and ONLY when) the user asks you to do one of these, end your reply with one command per line, each on its own line at the very END of your response:
+  @rename OLDNAME NEWNAME     — rename a function / variable / type program-wide (NEWNAME must be a valid C identifier, no spaces)
+  @goto FUNCNAME              — scroll the user to that function
+  @comment FUNCNAME text...   — attach an explanatory comment line above that function (text may contain spaces)
+  @autoname                   — analyze every function and give them all accurate names at once
+  @nop 0xADDR                 — replace the instruction at virtual address ADDR with NOPs (byte patch)
+  @patch 0xADDR instruction   — assemble `instruction` and write it over the one at ADDR (byte patch; must fit the slot)
+Addresses for @nop / @patch come from the "disassembly" section of the context — each line is `ADDRESS:  instruction`. Use the leading hex address (e.g. 0x100003f2c). To bypass a check, NOP the conditional branch, or @patch it to an unconditional jump / a constant return — explain which and why.
+IMPORTANT: @nop and @patch DO NOT take effect immediately — they are PROPOSALS. EmberDragon shows the user a confirmation dialog with the exact bytes, and the user clicks Apply. So it is safe to propose a patch when asked; just say what it does. Use the EXACT current name as OLDNAME (e.g. sub_100000abc, or whatever it is now). Do not invent names or patches the user did not ask for. If the user is just asking a question, do NOT emit any command.'
+
+if [ -n "$context" ]; then
+  prompt="$question"$'\n\nHere is the decompiled code I am looking at:\n\n'"$context"
+else
+  prompt="$question"
+fi
+
+out="$(printf '%s' "$prompt" | "$claude" -p --append-system-prompt "$sys" 2>/dev/null)" \
+  || { printf '(claude CLI error — is it logged in?)\n'; exit 0; }
+[ -n "$out" ] || { printf '(no response from claude)\n'; exit 0; }
+printf '%s\n' "$out"

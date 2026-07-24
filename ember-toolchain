@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ember-toolchain — bundle the FULL compile toolchain into a self-contained dir so EmberDragon
+# can build native macOS AND Windows binaries with ZERO system dependencies. Copies (gigs, by design):
+#   • clang / clang++ / clangd        (Xcode toolchain front-ends)
+#   • the clang resource dir + libc++ headers
+#   • the macOS SDK                   (system headers + frameworks -> real #include <iostream> etc.)
+#   • mingw-w64                       (the Windows cross-compiler + its sysroot)
+# Proven: a clang copied out of Xcode compiles+runs <iostream> with `-isysroot <bundled SDK>`.
+#
+#   ember-toolchain [dest]            (default: /usr/local/share/emberdragon/toolchain)
+set -euo pipefail
+DEST="${1:-/usr/local/share/emberdragon/toolchain}"
+XC="$(xcode-select -p 2>/dev/null || echo /Users/gideoncox/Applications/Xcode-beta.app/Contents/Developer)"
+[ -d "$XC/Toolchains" ] || XC=/Users/gideoncox/Applications/Xcode-beta.app/Contents/Developer
+TC="$XC/Toolchains/XcodeDefault.xctoolchain"
+SDK="$XC/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+MINGW="$(ls -d /opt/homebrew/Cellar/mingw-w64/* 2>/dev/null | tail -1)"
+echo "🔧 bundling toolchain -> $DEST"
+echo "   from clang=$TC  sdk=$SDK  mingw=$MINGW"
+mkdir -p "$DEST/usr/bin" "$DEST/usr/lib" "$DEST/usr/include"
+
+echo "  • clang / clang++ / clangd"
+cp -f "$TC/usr/bin/clang"  "$DEST/usr/bin/clang"
+cp -f "$TC/usr/bin/clangd" "$DEST/usr/bin/clangd" 2>/dev/null || true
+ln -sf clang "$DEST/usr/bin/clang++"
+echo "  • resource dir + libc++ headers"
+rsync -a --delete "$TC/usr/lib/clang"     "$DEST/usr/lib/"      2>/dev/null
+rsync -a --delete "$TC/usr/include/c++"   "$DEST/usr/include/"  2>/dev/null
+# libc++/libc++abi dylibs (harmless to bundle; programs normally link the system ones)
+for d in libc++.1.dylib libc++abi.1.dylib; do [ -f "$TC/usr/lib/$d" ] && cp -f "$TC/usr/lib/$d" "$DEST/usr/lib/$d"; done
+
+echo "  • macOS SDK ($(du -sh "$SDK" 2>/dev/null | cut -f1)) — system headers + frameworks"
+rsync -a --delete "$SDK/" "$DEST/MacOSX.sdk/" 2>/dev/null
+
+if [ -n "$MINGW" ]; then
+  echo "  • mingw-w64 ($(du -sh "$MINGW" 2>/dev/null | cut -f1)) — Windows cross-compiler"
+  rsync -a --delete "$MINGW/" "$DEST/mingw/" 2>/dev/null
+else echo "  ⚠️ no mingw-w64 in /opt/homebrew/Cellar (Windows builds will fall back to system mingw)"; fi
+
+# ad-hoc re-sign the copied front-ends so Gatekeeper runs them
+for b in clang clangd; do xattr -c "$DEST/usr/bin/$b" 2>/dev/null || true; codesign --force -s - "$DEST/usr/bin/$b" >/dev/null 2>&1 || true; done
+
+# write a manifest the engines read to locate the toolchain
+cat > "$DEST/manifest.json" <<JSON
+{ "clang": "usr/bin/clang++", "clangd": "usr/bin/clangd", "sdk": "MacOSX.sdk",
+  "mingw_gxx": "mingw/bin/x86_64-w64-mingw32-g++", "mingw_gcc": "mingw/bin/x86_64-w64-mingw32-gcc" }
+JSON
+echo "✅ toolchain bundled: $(du -sh "$DEST" 2>/dev/null | cut -f1) in $DEST"
+echo "   native:  \$DEST/usr/bin/clang++ -isysroot \$DEST/MacOSX.sdk file.cpp"
+echo "   windows: \$DEST/mingw/bin/x86_64-w64-mingw32-g++ file.cpp -o file.exe"

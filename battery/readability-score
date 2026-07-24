@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# readability-score: objective readability metrics over the battery (lower = better).
+# Decompiles every battery program (--ai none --collapse) and counts the slop a human
+# reader has to wade through: raw machine temps/registers, byte-index math, undecoded
+# instructions, leaked lifter markers, and typeless `long` decls.
+set -u
+DIR="$(cd "$(dirname "$0")"/.. && pwd)"
+ED="$DIR/emberdragon"
+SRC="$DIR/battery/src"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+ONLY="${1:-}"
+
+tot_temps=0 tot_regs=0 tot_idx=0 tot_word=0 tot_marker=0 tot_long=0 tot_lines=0 n=0
+printf "%-26s %6s %6s %6s %6s %6s %6s\n" name temps regs idxslop word markers longs
+for src in "$SRC"/*; do
+  name="$(basename "$src")"; name="${name%.*}"
+  [ -n "$ONLY" ] && [ "$ONLY" != "$name" ] && continue
+  case "$src" in *.cpp) cc=clang++;; *.c) cc=clang;; *) continue;; esac
+  bin="$TMP/$name"
+  $cc -arch arm64 -O0 -o "$bin" "$src" 2>/dev/null || continue
+  out="$TMP/$name.c"; "$ED" "$bin" --ai none --collapse 2>/dev/null > "$out"
+  # vN / tN temps (not v-words like "value"): a v/t directly followed by digits
+  temps=$(grep -oE '\b[vt][0-9]+\b' "$out" | wc -l | tr -d ' ')
+  # raw machine registers leaked into source
+  regs=$(grep -oE '\b([xw][0-9]+|r[0-9]+|rax|rbx|rcx|rdx|rsi|rdi|rbp|rsp)\b' "$out" | wc -l | tr -d ' ')
+  # byte-index slop: subscript containing a shift/×const  arr[i << 2] / arr[i * 4]
+  idx=$(grep -oE '\[[^]]*(<< [0-9]|\* [0-9])' "$out" | wc -l | tr -d ' ')
+  # undecoded instructions
+  word=$(grep -oE '\.word|\.byte' "$out" | wc -l | tr -d ' ')
+  # leaked lifter markers / unresolved stubs
+  marker=$(grep -oE 'unresolved|neon:|@widths|@types|@data|g_[0-9a-f]{6,}' "$out" | wc -l | tr -d ' ')
+  # typeless decls: a bare `long <name>;` local (rough proxy for shallow type recovery)
+  longs=$(grep -cE '^\s+long [a-z]' "$out")
+  lines=$(wc -l < "$out" | tr -d ' ')
+  printf "%-26s %6s %6s %6s %6s %6s %6s\n" "$name" "$temps" "$regs" "$idx" "$word" "$marker" "$longs"
+  tot_temps=$((tot_temps+temps)); tot_regs=$((tot_regs+regs)); tot_idx=$((tot_idx+idx))
+  tot_word=$((tot_word+word)); tot_marker=$((tot_marker+marker)); tot_long=$((tot_long+longs))
+  tot_lines=$((tot_lines+lines)); n=$((n+1))
+done
+echo "------------------------------------------------------------------------------"
+printf "%-26s %6s %6s %6s %6s %6s %6s   (%d programs, %d lines)\n" TOTAL \
+  "$tot_temps" "$tot_regs" "$tot_idx" "$tot_word" "$tot_marker" "$tot_long" "$n" "$tot_lines"
+# single scalar score: weighted slop per 100 lines (lower = more readable)
+score=$(( (tot_temps*2 + tot_regs*4 + tot_idx*3 + tot_word*5 + tot_marker*2 + tot_long) ))
+echo "SLOP SCORE = $score  (weighted; lower is better)"

@@ -1,0 +1,5 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling binary_search
+  decompiling reverse_inplace
+ember-arm64: 3 user function(s) decompiled, 138 library function(s) skipped

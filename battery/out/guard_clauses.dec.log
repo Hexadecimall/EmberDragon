@@ -1,0 +1,5 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling classify_triangle
+  decompiling name_for
+ember-arm64: 3 user function(s) decompiled, 36 library function(s) skipped

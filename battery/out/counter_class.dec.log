@@ -1,0 +1,10 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling Counter
+  decompiling tick
+  decompiling untick
+  decompiling reset
+  decompiling get
+  decompiling live
+  decompiling Counter
+ember-arm64: 8 user function(s) decompiled, 35 library function(s) skipped

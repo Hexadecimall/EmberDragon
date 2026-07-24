@@ -1,0 +1,4 @@
+/Users/gideoncox/pullio/decompile/battery/src/p2_bitfields.c:27:10: warning: implicit truncation from 'int' to bit-field changes value from 20 to 4 [-Wbitfield-constant-conversion]
+   27 |     px.a = 20;           /* 20 & 0xF == 4 */
+      |          ^ ~~
+1 warning generated.

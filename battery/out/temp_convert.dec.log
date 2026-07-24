@@ -1,0 +1,8 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling convert
+  decompiling c_to_f
+  decompiling c_to_k
+  decompiling mi_to_km
+  decompiling f_to_c
+ember-arm64: 6 user function(s) decompiled, 43 library function(s) skipped

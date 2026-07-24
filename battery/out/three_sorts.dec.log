@@ -1,0 +1,6 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling bubble_sort
+  decompiling insertion_sort
+  decompiling selection_sort
+ember-arm64: 4 user function(s) decompiled, 0 library function(s) skipped

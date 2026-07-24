@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+# ember-local — EmberDragon's offline, NO-CLOUD local model for the `--ai local` path.
+# Reads decompiled C on stdin; uses the corpus similarity matcher to recover each
+# sub_<addr> function's INTENT and transfer the canonical name + parameter names from
+# the corpus; annotates with a comment. Degrades to verbatim pass-through if the binary
+# or models are absent. NO network, no API key, fully deterministic.
+#
+#   NX_LOCAL_BIN=/path/to/binary  ember-lift --nosym <bin> | ember-local
+#   (the emberdragon launcher sets NX_LOCAL_BIN for `--ai local`)
+import sys, os, re, json, glob, subprocess, tempfile, collections
+
+HERE   = os.path.dirname(os.path.abspath(__file__))
+CORPUS = os.environ.get("NX_LOCAL_CORPUS", os.path.join(HERE, "corpus/sig/sigs.jsonl"))
+GENDIR = os.path.join(HERE, "corpus/sig/gen")
+BIN    = os.environ.get("NX_LOCAL_BIN", "")
+MINCONF= os.environ.get("NX_LOCAL_MIN", "0.80")
+
+def load_sigmap():
+    # intent -> canonical [param names], from the corpus SOURCE (the names we transfer)
+    sigs = collections.defaultdict(collections.Counter)
+    for f in glob.glob(os.path.join(GENDIR, "*.cpp")):
+        try: lines = open(f).read().splitlines()
+        except Exception: continue
+        for line in lines:
+            m = re.match(r'\s*(?:static\s+)?[\w\s\*]+?\b([a-z_]+)__[a-z0-9]+_\d+\s*\(([^)]*)\)', line)
+            if not m: continue
+            intent = m.group(1); names = []
+            for p in m.group(2).split(','):
+                p = p.strip()
+                if not p or p == 'void': continue
+                nm = re.findall(r'([A-Za-z_]\w*)', p)
+                if nm: names.append(nm[-1])
+            sigs[intent][tuple(names)] += 1
+    return {k: list(v.most_common(1)[0][0]) for k, v in sigs.items()}
+
+def match_intents():
+    # lifter --nosym --records on the binary -> ember-fp -> ember-match -> {addr: intent}
+    if not BIN or not os.path.exists(BIN) or not os.path.exists(CORPUS): return {}
+    try:
+        head = open(BIN, "rb").read(8)
+    except Exception: return {}
+    eng = "ember-arm64" if (len(head) >= 8 and head[4] == 0x0c and head[7] == 0x01) else "ember-lift"
+    rec = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False).name
+    fpf = rec + ".fp"
+    try:
+        subprocess.run([os.path.join(HERE, eng), "--nosym", "--records", rec, BIN],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        fp = subprocess.run([os.path.join(HERE, "ember-fp"), rec], capture_output=True, text=True).stdout
+        open(fpf, "w").write(fp)
+        ms = subprocess.run([os.path.join(HERE, "ember-match"), CORPUS, fpf, "--min", MINCONF],
+                            capture_output=True, text=True).stdout
+        out = {}
+        for line in ms.splitlines():
+            p = line.split()
+            if len(p) >= 2 and p[0].startswith("0x"): out[p[0]] = p[1]
+        return out
+    except Exception: return {}
+    finally:
+        for x in (rec, fpf):
+            try: os.unlink(x)
+            except Exception: pass
+
+DEF_RE = re.compile(r'^([A-Za-z_][\w\s\*]*?)\b(sub_[0-9a-f]+)\s*\(([^)]*)\)\s*\{?\s*$')
+
+def main():
+    src = sys.stdin.read()
+    intents = match_intents()
+    if not intents:
+        sys.stdout.write(src); return                     # pass-through — never break the pipeline
+    sig = load_sigmap()
+    lines = src.split("\n")
+    fnren = {("sub_" + a[2:]): intent for a, intent in intents.items()}   # sub_<addr> -> intent (calls + defs + protos)
+    def apply_map(s, mp):
+        for old, new in mp.items():
+            s = re.sub(r'\b' + re.escape(old) + r'\b', new, s)
+        return s
+    out = []; i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = DEF_RE.match(line.strip())
+        if m and m.group(2) in fnren and line.rstrip().endswith("{"):
+            intent = fnren[m.group(2)]
+            params = [p.strip() for p in m.group(3).split(",") if p.strip() and p.strip() != "void"]
+            canon = sig.get(intent, []); pmap = {}
+            for k, p in enumerate(params):                # positional param-name transfer
+                nm = re.findall(r'([A-Za-z_]\w*)', p)
+                if nm and k < len(canon) and canon[k] != nm[-1]: pmap[nm[-1]] = canon[k]
+            depth = 0; j = i; block = []                  # brace-balanced function body
+            while j < len(lines):
+                depth += lines[j].count("{") - lines[j].count("}")
+                block.append(lines[j]); j += 1
+                if depth <= 0 and j > i: break
+            both = dict(fnren); both.update(pmap)
+            out.append("// recovered by local model: %s%s" % (
+                intent, ("(" + ", ".join(canon) + ")") if canon else ""))
+            for b in block: out.append(apply_map(b, both))
+            i = j
+        else:
+            out.append(apply_map(line, fnren)); i += 1
+    sys.stdout.write("\n".join(out))
+
+if __name__ == "__main__":
+    main()

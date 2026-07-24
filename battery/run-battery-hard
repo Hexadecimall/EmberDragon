@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# run-battery-hard — the HARD battery: larger programs, each compiled at its
+# suggested optimization level (O2 is the real stress test) and decompiled.
+set -uo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"; ember="$here/../emberdragon"
+mkdir -p "$here/hard/bin" "$here/hard/out"
+printf "%-26s %-4s %-6s %5s %5s %5s %5s  %s\n" "PROGRAM" "OPT" "BUILD" "SRC" "OUT" "FNS" "UNK" "CAT"
+printf '%.0s-' {1..82}; echo
+n=0; built=0; clean=0; tunk=0
+while IFS=$'\t' read -r file opt cat; do
+  [ -n "$file" ] || continue
+  name="${file%.*}"; ext="${file##*.}"; n=$((n+1))
+  cc=clang; std=c11; [ "$ext" = cpp ] && { cc=clang++; std=c++17; }
+  if "$cc" -std=$std -$opt "$here/hard/$file" -o "$here/hard/bin/$name" 2>"$here/hard/out/$name.build.log"; then
+    build=ok; built=$((built+1))
+  else printf "%-26s %-4s %-6s %5s\n" "$name" "$opt" FAIL "-"; continue; fi
+  src=$(grep -cve '^[[:space:]]*$' "$here/hard/$file")
+  "$ember" "$here/hard/bin/$name" --collapse > "$here/hard/out/$name.c" 2>/dev/null
+  out=$(grep -cve '^[[:space:]]*$' "$here/hard/out/$name.c")
+  fns=$(grep -cE '^\w.*\(.*\) \{' "$here/hard/out/$name.c")
+  unk=$(grep -cE '\.word|\.byte' "$here/hard/out/$name.c"); tunk=$((tunk+unk)); [ "$unk" = 0 ] && clean=$((clean+1))
+  printf "%-26s %-4s %-6s %5s %5s %5s %5s  %s\n" "$name" "$opt" "$build" "$src" "$out" "$fns" "$unk" "$cat"
+done < <(python3 -c "import json;[print(m['file']+chr(9)+m['opt']+chr(9)+m['cat']) for m in json.load(open('$here/hard/manifest.json'))]")
+printf '%.0s-' {1..82}; echo
+echo "hard programs=$n  built=$built  zero-unknown-decode=$clean  total-undecoded=$tunk"

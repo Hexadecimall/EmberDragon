@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# ember-claude — the AI rewrite pass, powered by the local `claude` CLI (claude -p).
+# Reads decompiled C/C++ on stdin, prints a clean, named, commented, behavior-
+# preserving rewrite. No API key needed (the CLI uses your Claude login). If
+# `claude` isn't found or errors, the input is passed through unchanged so the
+# pipeline never breaks.
+set -uo pipefail
+
+claude="$(command -v claude 2>/dev/null || true)"
+if [ -z "$claude" ]; then
+  for p in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
+    [ -x "$p" ] && { claude="$p"; break; }
+  done
+fi
+
+input="$(cat)"
+[ -n "$input" ] || exit 0
+if [ -z "$claude" ]; then printf '%s' "$input"; exit 0; fi   # no CLI -> pass through
+
+read -r -d '' prompt <<'PROMPT' || true
+You are an expert reverse engineer. The input is C/C++ produced by a from-scratch decompiler. Rewrite it into clean, idiomatic, correct, behavior-PRESERVING source that a senior engineer would ship:
+- Recover meaningful names for EVERY function, parameter, local, struct, and field — infer intent from behavior. No vN / tN / sub_<hex> / g_<hex> / Record0 names survive.
+- Restore real types and signatures (int, size_t, bool, char*, std::string, std::vector, the right struct types) instead of long / void*.
+- Recognize standard algorithms and idioms (array loops, string ops, sorting, math, data structures) and express them naturally.
+- Replace goto/label spaghetti with structured control flow (for / while / if-else / switch) wherever the logic allows, without changing behavior.
+- Add a concise doc-comment above each function describing what it does, plus brief inline comments for non-obvious steps.
+- Keep it compilable and faithful. Do NOT invent functionality or add features.
+Output ONLY the rewritten code as a single fenced code block, no prose before or after.
+PROMPT
+
+out="$(printf '%s' "$input" | "$claude" -p "$prompt" 2>/dev/null)" || { printf '%s' "$input"; exit 0; }
+[ -n "$out" ] || { printf '%s' "$input"; exit 0; }
+printf '%s\n' "$out" | grep -v '^[[:space:]]*```'          # strip markdown fences; keep the code

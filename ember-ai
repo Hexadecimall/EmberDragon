@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# ember-ai — AI naming pass for the decompiler. Reads ember-lift's decompiled C/C++ on
+# stdin, asks Claude to rename classes/fields/functions/vars to human names
+# (and recognize algorithms) based on behavior + recovered strings, prints the
+# rewritten code. The decompiler does the mechanical lift; the model does the
+# semantic naming the heuristics can't.
+#
+#   ember-lift prog.o | ember-ai
+#
+# Needs ANTHROPIC_API_KEY (your Claude API key — same one Cerberus uses).
+# Model defaults to claude-opus-4-8; override with NXAI_MODEL.
+# No pip installs: uses curl + python3 stdlib only.
+set -euo pipefail
+
+: "${ANTHROPIC_API_KEY:?ember-ai: set ANTHROPIC_API_KEY to your Claude API key}"
+export NXAI_MODEL="${NXAI_MODEL:-claude-opus-4-8}"
+export NXAI_CODE="$(cat)"
+export NXAI_SYS='You are a decompiler naming assistant. The input is C/C++ recovered by a decompiler, with placeholder names: classes like Record0, fields f0/f8, locals v8/v16, params arg0/arg1, functions sub_<hex>, strings s_<text>. Rename EVERY class, struct, field, function, parameter, and local to a meaningful, idiomatic name inferred from behavior, control flow, call patterns, and string constants. Recognize and name well-known algorithms (gcd, qsort, hashing, etc.) and collapse decompiler artifacts back to idiom (e.g. a - (a/b)*b is a % b). PRESERVE structure and semantics EXACTLY — rename and lightly comment only; never change logic. Output ONLY the rewritten code, no prose, no markdown fences.'
+
+python3 - <<'PY'
+import os, sys, json, urllib.request, urllib.error
+body = json.dumps({
+    "model": os.environ["NXAI_MODEL"],
+    "max_tokens": 16000,
+    "system": os.environ["NXAI_SYS"],
+    "messages": [{"role": "user",
+                  "content": "Rename this decompiled code to human-readable names:\n\n" + os.environ["NXAI_CODE"]}],
+}).encode()
+req = urllib.request.Request(
+    "https://api.anthropic.com/v1/messages", data=body,
+    headers={"x-api-key": os.environ["ANTHROPIC_API_KEY"],
+             "anthropic-version": "2023-06-01",
+             "content-type": "application/json"})
+try:
+    resp = json.load(urllib.request.urlopen(req, timeout=120))
+except urllib.error.HTTPError as e:
+    sys.stderr.write("ember-ai: API error %d: %s\n" % (e.code, e.read().decode()[:500]))
+    sys.exit(1)
+except Exception as e:
+    sys.stderr.write("ember-ai: request failed: %s\n" % e)
+    sys.exit(1)
+sys.stdout.write("".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text") + "\n")
+PY

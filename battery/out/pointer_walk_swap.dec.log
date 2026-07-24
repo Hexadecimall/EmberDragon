@@ -1,0 +1,6 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling walk_sum
+  decompiling reverse
+  decompiling swap_ints
+ember-arm64: 4 user function(s) decompiled, 0 library function(s) skipped

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ember-rename — whole-program understanding -> a global rename map. Reads the
+# FULL decompiled program on stdin, asks the local `claude` CLI to figure out
+# what the program does, and prints a JSON object mapping each machine-y symbol
+# (sub_<hex>, RecordN, fN fields, vN/tN/aN, g_<hex>) to a meaningful name.
+# Output is JSON only: {"sub_100000abc":"parse_header","Record0":"Token", ...}
+# If claude is missing/fails, prints {} so the caller cleanly no-ops.
+set -uo pipefail
+claude="$(command -v claude 2>/dev/null || true)"
+[ -z "$claude" ] && for p in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do [ -x "$p" ] && { claude="$p"; break; }; done
+input="$(cat)"; [ -n "$input" ] || { echo '{}'; exit 0; }
+[ -z "$claude" ] && { echo '{}'; exit 0; }
+
+read -r -d '' prompt <<'PROMPT' || true
+You are an expert reverse engineer doing WHOLE-PROGRAM analysis. Below is the complete decompiled output of one program. Read ALL of it, infer what the program does overall and what each piece contributes, then produce a GLOBAL RENAME MAP that gives every machine-generated identifier a clear, meaningful name based on its behavior and role in the program.
+
+Rename these kinds of identifiers (keys = the exact current token as it appears):
+- functions named sub_<hex> (and any vague names) -> a verb-y name describing what they do
+- synthesized classes/structs RecordN / S_* -> a noun describing what they model
+- struct fields fN / member / data / value -> meaningful field names
+- globals g_<hex> -> a name for the constant/global
+Do NOT rename: main, argc, argv, real library names (printf, malloc, std::*), C keywords/types.
+
+Output ONLY a single JSON object mapping oldName -> newName, nothing else (no prose, no code fences). Keep names valid C identifiers (snake_case for funcs/fields, PascalCase for types). If you are unsure about an identifier, omit it.
+PROMPT
+
+out="$(printf '%s' "$input" | "$claude" -p "$prompt" 2>/dev/null)" || { echo '{}'; exit 0; }
+# extract the JSON object (strip any stray prose / code fences)
+echo "$out" | grep -v '^[[:space:]]*```' | sed -n '/{/,/}/p' | tr -d '\n' | grep -o '{.*}' || echo '{}'

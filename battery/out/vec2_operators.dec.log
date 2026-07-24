@@ -1,0 +1,10 @@
+  debug info: none — inferring all names by behavior + FLIRT
+  decompiling main
+  decompiling Vec2
+  decompiling operator+
+  decompiling scaled
+  decompiling x
+  decompiling y
+  decompiling operator==
+  decompiling Vec2
+ember-arm64: 8 user function(s) decompiled, 35 library function(s) skipped

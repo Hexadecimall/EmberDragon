@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+# ember-match — compare query function fingerprints against the labeled corpus and
+# recover INTENT. K-nearest-neighbor over fingerprints, score-weighted plurality vote,
+# gated by confidence + margin so weak matches stay SILENT (refusing beats mislabeling).
+#
+#   ember-match <corpus-sigs.jsonl> <query-fp.jsonl> [--min 0.80]
+#   -> per function:  0x140  crc8  0.94  (margin 0.31, top 0.97)   (silent when unsure)
+import sys, json, math
+
+TAU=0.80; MARGIN=0.15; K=7; MIN_INSN=6; FLOOR=0.55
+
+def cosine(a,b):
+    d=sum(x*y for x,y in zip(a,b)); na=math.sqrt(sum(x*x for x in a)); nb=math.sqrt(sum(x*x for x in b))
+    return d/(na*nb) if na>0 and nb>0 else 0.0
+def jac(a,b):
+    sa,sb=set(a),set(b)
+    if not sa and not sb: return 0.5            # both have no magic constants -> neutral
+    u=sa|sb; return len(sa&sb)/len(u) if u else 0.5
+def score(q,c):
+    return 0.70*cosine(q["feat"],c["feat"]) + 0.20*jac(q["consts"],c["consts"]) + 0.10*jac(q["calls"],c["calls"])
+
+def load(path):
+    db=[]
+    for line in open(path):
+        line=line.strip()
+        if not line: continue
+        try: e=json.loads(line)
+        except Exception: continue
+        if e.get("label") and e["label"]!="sub_0" and not e["label"].startswith("sub_"): db.append(e)
+    return db
+
+def approx_insn(q): return sum(round(2**(f/4)-1) for f in q["feat"])
+
+def match(q, db, minconf):
+    cand=[(score(q,c),c) for c in db if c["arch"]==q["arch"]]
+    if not cand: return None
+    cand.sort(key=lambda x:-x[0]); top=cand[:K]
+    if top[0][0] < FLOOR: return None
+    by={}
+    for s,c in top: by[c["label"]]=by.get(c["label"],0.0)+s
+    total=sum(by.values()); ranked=sorted(by.items(), key=lambda x:-x[1])
+    win,winsum=ranked[0]; conf=winsum/total if total else 0.0
+    second=ranked[1][1] if len(ranked)>1 else 0.0
+    margin=(winsum-second)/total if total else conf
+    if conf>=minconf and margin>=MARGIN and top[0][0]>=FLOOR:
+        return (win, conf, margin, top[0][0])
+    return None
+
+def main():
+    a=sys.argv[1:]
+    if len(a)<2: print("usage: ember-match <corpus-sigs.jsonl> <query-fp.jsonl> [--min 0.80]",file=sys.stderr); sys.exit(2)
+    minconf=TAU
+    if "--min" in a: minconf=float(a[a.index("--min")+1])
+    db=load(a[0])
+    print(f"# corpus: {len(db)} labeled fingerprints", file=sys.stderr)
+    for line in open(a[1]):
+        line=line.strip()
+        if not line: continue
+        q=json.loads(line)
+        if approx_insn(q) < MIN_INSN: continue            # skip tiny accessors (fingerprint identically)
+        r=match(q, db, minconf)
+        if r:
+            win,conf,margin,top1=r
+            print(f'{q["addr"]}  {win}  {conf:.2f}  (margin {margin:.2f}, top {top1:.2f})')
+
+if __name__=="__main__": main()

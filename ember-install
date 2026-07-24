@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# ember-install — build the WHOLE EmberDragon toolchain and install it into
+# /usr/local/bin so every tool is a global command (like nxrt / pullio).
+# Shared data (FLIRT sigs.db, logo, code font) goes to /usr/local/share/emberdragon
+# where the GUI's resource lookup finds it. Rollback-safe: the previous install is
+# backed up first, and `ember-install --rollback` restores it.
+#
+#   ember-install               build (incremental) + install CLI + both .apps
+#   ember-install --build        FORCE a clean rebuild of every engine + GUI from source first
+#   ember-install --no-app      CLI only (skip the macOS .app bundles)
+#   ember-install --rollback    restore the most recent backup
+#   ember-install --list        list backups
+#
+# Builds are LOUD on failure: a broken compile aborts the install instead of silently
+# shipping the old binary. Nothing here is AI-gated: the CLI binaries are inert until
+# invoked; the GUI AI panel is its own binary (ember-gui-ai).
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+NOAPP=0; NOTOOLS=0; BUILD=0
+for a in "$@"; do case "$a" in --no-app) NOAPP=1;; --no-toolchain) NOTOOLS=1;; --build|--rebuild) BUILD=1;; esac; done
+BIN="/usr/local/bin"
+SHARE="/usr/local/share/emberdragon"
+BK="/usr/local/share/emberdragon/.backups"
+
+# every tool that makes up EmberDragon — "bundle everything"
+CXX_ENGINES="emberdragon ember-lift ember-arm64 ember-dis ember-collapse ember-sigs ember-tui ember-info ember-brain"
+GUIS="ember-gui ember-gui-ai"
+SCRIPTS="ember-claude ember-rename ember-ask ember-ai ember-local"   # ember-apple is compiled (below)
+ALL_TOOLS="$CXX_ENGINES $GUIS $SCRIPTS ember-apple"
+
+list_backups(){ ls -dt "$BK"/* 2>/dev/null || true; }
+
+if [ "${1:-}" = "--list" ]; then
+  echo "EmberDragon install backups in $BK:"; list_backups | while read -r b; do echo "  $(basename "$b")   $(date -r "$b" '+%Y-%m-%d %H:%M:%S')"; done
+  exit 0
+fi
+
+if [ "${1:-}" = "--rollback" ]; then
+  newest="$(list_backups | head -1)"; [ -z "$newest" ] && { echo "no backups in $BK"; exit 1; }
+  echo "↩️  restoring $(basename "$newest")"
+  while IFS= read -r f; do [ -n "$f" ] && cp -f "$newest/$(basename "$f")" "$BIN/$(basename "$f")" 2>/dev/null && xattr -c "$BIN/$(basename "$f")" 2>/dev/null || true; done < <(ls "$newest" 2>/dev/null | grep -vE '^res$')
+  [ -d "$newest/res" ] && { mkdir -p "$SHARE"; cp -f "$newest/res/"* "$SHARE/" 2>/dev/null || true; }
+  echo "✅ rolled back. (the tools are at $BIN/ember-*)"
+  exit 0
+fi
+
+echo "🔥🐉 EmberDragon — build + install the whole toolchain into $BIN"
+
+# 1. BUILD everything from source (loud on failure). --build forces a clean rebuild; otherwise
+#    each engine is rebuilt only when its .cpp is newer than the binary (the GUIs always rebuild).
+log="$(mktemp)"; trap 'rm -f "$log"' EXIT
+gui() { local label="$1"; shift; printf "  building %s… " "$label"
+  if (cd "$here" && "$@") >"$log" 2>&1; then echo "ok"; else echo "FAILED"; echo "── $label build error ──"; tail -25 "$log"; exit 1; fi; }
+engine() { local t="$1"; [ -f "$here/$t.cpp" ] || return 0
+  if [ "$BUILD" = 1 ] || [ ! -x "$here/$t" ] || [ "$here/$t.cpp" -nt "$here/$t" ]; then printf "  building %s… " "$t"
+    if (cd "$here" && clang++ -std=c++17 -O2 "$t.cpp" -o "$t") >"$log" 2>&1; then echo "ok"; else echo "FAILED"; echo "── $t build error ──"; tail -25 "$log"; exit 1; fi; fi; }
+echo "🛠  building from source$([ "$BUILD" = 1 ] && echo ' (clean --build)')…"
+[ "$BUILD" = 1 ] && (cd "$here" && rm -f $CXX_ENGINES ember-gui ember-gui-ai ember-gui.exe 2>/dev/null || true)   # force a from-scratch rebuild
+gui "ember-gui"    ./ember-gui-build mac
+gui "ember-gui-ai" ./ember-gui-build mac ai
+for t in $CXX_ENGINES; do engine "$t"; done
+if [ -f "$here/ember-apple.swift" ] && { [ "$BUILD" = 1 ] || [ ! -x "$here/ember-apple" ]; }; then
+  printf "  building ember-apple… "; (cd "$here" && swiftc -O ember-apple.swift -o ember-apple) >"$log" 2>&1 && echo "ok" || echo "skipped (swiftc)"; fi
+
+# 2. back up whatever is currently installed (binaries + resources) before overwriting
+ts="$(date +%Y%m%d-%H%M%S)"; dst="$BK/$ts"; mkdir -p "$dst"
+for t in $ALL_TOOLS; do [ -e "$BIN/$t" ] && cp -p "$BIN/$t" "$dst/" 2>/dev/null || true; done
+if ls "$SHARE"/*.db "$SHARE"/*.png "$SHARE"/*.ttc >/dev/null 2>&1; then mkdir -p "$dst/res"; cp -p "$SHARE"/*.db "$SHARE"/*.png "$SHARE"/*.ttc "$dst/res/" 2>/dev/null || true; fi
+[ -z "$(ls -A "$dst" 2>/dev/null)" ] && rmdir "$dst" 2>/dev/null || echo "  backed up current install -> $dst"
+# keep newest 5 backups
+list_backups | tail -n +6 | while read -r old; do rm -rf "$old"; done
+
+# 3. install every tool into /usr/local/bin
+n=0
+for t in $ALL_TOOLS; do
+  [ -e "$here/$t" ] || { echo "  ⚠️  missing $t (skipped)"; continue; }
+  cp -f "$here/$t" "$BIN/$t"; chmod +x "$BIN/$t"
+  xattr -c "$BIN/$t" 2>/dev/null || true                                  # drop com.apple.provenance
+  case "$(file -b "$BIN/$t")" in *Mach-O*) codesign --force -s - "$BIN/$t" >/dev/null 2>&1 || true;; esac
+  n=$((n+1))
+done
+
+# 4. install shared resources where the GUI looks (/usr/local/share/emberdragon)
+mkdir -p "$SHARE"
+# FLIRT DB: ship the UNION of the seed + the accumulated App-Support DB + whatever's
+# already installed, deduped — NOT just the small seed (the old code always clobbered
+# with assets/seed.db, so /usr/local/share stayed at the 21k seed while 77k accumulated
+# sigs sat unused in App Support). More sigs -> FLIRT names more functions.
+{ [ -f "$here/assets/seed.db" ] && cat "$here/assets/seed.db"
+  [ -f "$HOME/Library/Application Support/EmberDragon/sigs.db" ] && cat "$HOME/Library/Application Support/EmberDragon/sigs.db"
+  [ -f "$SHARE/sigs.db" ] && cat "$SHARE/sigs.db"; } 2>/dev/null | LC_ALL=C sort -u > "$SHARE/sigs.db.tmp" 2>/dev/null
+if [ -s "$SHARE/sigs.db.tmp" ]; then mv -f "$SHARE/sigs.db.tmp" "$SHARE/sigs.db"; echo "  installed sigs.db ($(wc -l <"$SHARE/sigs.db") sigs, union)"; else rm -f "$SHARE/sigs.db.tmp"; fi
+[ -f "$here/assets/logo.png" ] && cp -f "$here/assets/logo.png" "$SHARE/logo.png"
+for FT in /System/Library/Fonts/Menlo.ttc /System/Library/Fonts/SFNSMono.ttf; do [ -f "$FT" ] && cp -f "$FT" "$SHARE/$(basename "$FT")" && break; done
+
+# 5. make sure NXRT (EmberRun's foreign-binary engine) is present in /usr/local/bin
+if [ ! -x "$BIN/nxrt" ]; then
+  for c in "$HOME/.local/bin/nxrt" "$here/nxrt"; do [ -x "$c" ] && cp -f "$c" "$BIN/nxrt" && chmod +x "$BIN/nxrt" && break; done
+fi
+
+# 6. install the manager scripts themselves so they're global commands too
+for s in ember-install ember-app-bundle ember-app-rollback ember-toolchain ember-check; do
+  [ -f "$here/$s" ] && cp -f "$here/$s" "$BIN/$s" && chmod +x "$BIN/$s" && xattr -c "$BIN/$s" 2>/dev/null || true
+done
+
+# 6b. bundle the FULL compile toolchain (clang + macOS SDK + mingw) once — skipped if already present
+#     (it's ~2.5GB; the GUI/recompile + EmberRun use it for zero-dep native & Windows builds).
+if [ "$NOTOOLS" != 1 ] && [ ! -x "$SHARE/toolchain/usr/bin/clang" ]; then
+  echo "  bundling compile toolchain (one-time, ~2.5GB)…"; "$here/ember-toolchain" "$SHARE/toolchain" 2>&1 | sed 's/^/    /' | tail -3
+elif [ -x "$SHARE/toolchain/usr/bin/clang" ]; then echo "  toolchain already bundled ($(du -sh "$SHARE/toolchain" 2>/dev/null|cut -f1)) — skipping"; fi
+
+# 7. also build + install the macOS .app bundles (unless --no-app) — both the offline
+#    EmberDragon.app and the AI EmberDragon-AI.app land in ~/Applications, atomic + rollback-safe.
+if [ "$NOAPP" != 1 ]; then
+  echo "  building macOS apps…"
+  (cd "$here" && ./ember-app-bundle      >/dev/null 2>&1) && echo "  ✅ ~/Applications/EmberDragon.app"
+  (cd "$here" && ./ember-app-bundle --ai >/dev/null 2>&1) && echo "  ✅ ~/Applications/EmberDragon-AI.app"
+fi
+
+echo "✅ installed $n tools + manager scripts to $BIN  +  resources to $SHARE$([ "$NOAPP" != 1 ] && echo '  + 2 .apps in ~/Applications')"
+echo "   try:  emberdragon <binary> --collapse        ember-gui <binary>        ember-gui-ai <binary>"
+echo "   rollback:  ember-install --rollback   (apps: ember-app-rollback [--ai])"

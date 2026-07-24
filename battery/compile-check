@@ -1,0 +1,34 @@
+#!/bin/zsh
+# compile-check — for every battery source, compile it, run `emberdragon --collapse`,
+# and test whether the cleaned-up output COMPILES (clang++ -fsyntax-only). Reports
+# pass/fail counts + the failing names. This is the metric for the offline-cleanup work.
+#   ./compile-check            # run all, summary + failing list
+#   ./compile-check -v <name>  # show one program's output + its compiler errors
+cd "$(dirname "$0")"
+setopt NULL_GLOB
+ED=../emberdragon
+srcs=()
+for d in src hard; do for f in $d/*.c $d/*.cpp; do [[ -f "$f" ]] && srcs+=("$f"); done; done
+verbose=0; only=""
+[[ "$1" == "-v" ]] && { verbose=1; only="$2"; }
+pass=0; fail=0; nodec=0; failing=()
+for src in $srcs; do
+  name="${src:t:r}"
+  [[ -n "$only" && "$name" != "$only" ]] && continue
+  cxx=clang++; cstd=-std=c++17; [[ "$src" == *.c ]] && { cxx=clang; cstd=-std=c11; }
+  $cxx $cstd -O0 "$src" -o "/tmp/cc_$name" 2>/dev/null || { continue; }
+  $ED "/tmp/cc_$name" --collapse > "/tmp/cc_${name}.out" 2>/dev/null
+  [[ -s "/tmp/cc_${name}.out" ]] || { nodec=$((nodec+1)); failing+=("$name(no-decomp)"); continue; }
+  if clang++ -x c++ -std=c++17 -fsyntax-only -w "/tmp/cc_${name}.out" 2>"/tmp/cc_${name}.err"; then
+    pass=$((pass+1)); [[ $verbose == 1 ]] && echo "✓ $name compiles"
+  else
+    fail=$((fail+1)); failing+=("$name")
+    if [[ $verbose == 1 ]]; then
+      echo "=== $name OUTPUT ==="; cat "/tmp/cc_${name}.out"
+      echo "=== $name ERRORS ==="; head -25 "/tmp/cc_${name}.err"
+    fi
+  fi
+done
+[[ $verbose == 1 ]] && exit 0
+echo "── compile-check: $pass compile / $fail fail / $nodec no-decomp ──"
+echo "FAILING: ${failing[@]}"
